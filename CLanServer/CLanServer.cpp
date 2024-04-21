@@ -3,94 +3,6 @@
 #include <process.h>
 #include <fstream>
 
-void CLanServer::PrintMTFileLog() {
-	mtFileLogger.LockMTLogger();
-
-	time_t now = time(0);
-	struct tm timeinfo;
-	char buffer[80];
-	localtime_s(&timeinfo, &now);
-	strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", &timeinfo);
-	std::string currentDateTime = std::string(buffer);
-
-	// 파일 경로 생성
-	std::string filePath = "./" + currentDateTime + ".txt";
-
-	// 파일 스트림 열기
-	std::ofstream outputFile(filePath);
-
-	if (!outputFile) {
-		std::cerr << "파일을 열 수 없습니다." << std::endl;
-		return;
-	}
-
-	outputFile << currentDateTime << std::endl;
-	outputFile << "LastIndex   : " << mtFileLogger.GetNowIndex() << std::endl;
-	outputFile << "IndexTurnCnt: " << mtFileLogger.GetIndexTurnCnt() << std::endl;
-
-	USHORT logIdxLimit;
-	if (mtFileLogger.GetIndexTurnCnt() == 0) {
-		logIdxLimit = mtFileLogger.GetNowIndex();
-	}
-	else {
-		logIdxLimit = USHRT_MAX;
-	}
-	for (size_t idx = 0; idx <= logIdxLimit; idx++) {
-		outputFile << "----------------------------------------------------" << endl;
-		outputFile << "thread ID: " << mtFileLogger.GetLogStruct(idx).threadID << endl;
-		switch (mtFileLogger.GetLogStruct(idx).ptr0) {
-		case 0:
-			outputFile << "[RECV COMPLETION]" << endl;
-			outputFile << "Recv Bytes: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
-			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
-			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
-			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
-			break;
-		case 1:
-			outputFile << "[SEND COMPLETION]" << endl;
-			outputFile << "Send Buff: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
-			outputFile << "Send Bytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
-			outputFile << "Send Offset: " << mtFileLogger.GetLogStruct(idx).ptr3 << endl;
-			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
-			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
-			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
-			break;
-		case 2:
-			outputFile << "[OnRecv]" << endl;
-			outputFile << "Send Buff(new): " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
-			outputFile << "RecvBytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
-			break;
-		case 3:
-			outputFile << "[SendPost]" << endl;
-			outputFile << "Send Buff: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
-			outputFile << "Send Bytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
-			outputFile << "Send Limits: " << mtFileLogger.GetLogStruct(idx).ptr3 << endl;
-			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
-			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
-			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
-			break;
-		case 4:
-			outputFile << "[SendPacekt]" << endl;
-			outputFile << "Send Buff: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
-			outputFile << "Send Bytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
-			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
-			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
-			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
-			break;
-		case 5:
-			outputFile << "[SEND COMPLETION (Intro)]" << endl;
-			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
-			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
-			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
-		}
-	}
-
-	// 파일 닫기
-	outputFile.close();
-
-	std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
-}
-
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort, 
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, 
 	uint16 maxOfConnections, bool beNagle,
@@ -499,7 +411,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 {
 	CLanServer* clanserver = (CLanServer*)arg;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool(100);
+	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool(0);	// 생성자에서 설정한 Default 값을 따름
 #endif
 
 	while (true) {
@@ -630,3 +542,94 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 	return 0;
 }
+
+
+#if defined(MT_FILE_LOG)
+void CLanServer::PrintMTFileLog() {
+	mtFileLogger.LockMTLogger();
+
+	time_t now = time(0);
+	struct tm timeinfo;
+	char buffer[80];
+	localtime_s(&timeinfo, &now);
+	strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", &timeinfo);
+	std::string currentDateTime = std::string(buffer);
+
+	// 파일 경로 생성
+	std::string filePath = "./" + currentDateTime + ".txt";
+
+	// 파일 스트림 열기
+	std::ofstream outputFile(filePath);
+
+	if (!outputFile) {
+		std::cerr << "파일을 열 수 없습니다." << std::endl;
+		return;
+	}
+
+	outputFile << currentDateTime << std::endl;
+	outputFile << "LastIndex   : " << mtFileLogger.GetNowIndex() << std::endl;
+	outputFile << "IndexTurnCnt: " << mtFileLogger.GetIndexTurnCnt() << std::endl;
+
+	USHORT logIdxLimit;
+	if (mtFileLogger.GetIndexTurnCnt() == 0) {
+		logIdxLimit = mtFileLogger.GetNowIndex();
+	}
+	else {
+		logIdxLimit = USHRT_MAX;
+	}
+	for (size_t idx = 0; idx <= logIdxLimit; idx++) {
+		outputFile << "----------------------------------------------------" << endl;
+		outputFile << "thread ID: " << mtFileLogger.GetLogStruct(idx).threadID << endl;
+		switch (mtFileLogger.GetLogStruct(idx).ptr0) {
+		case 0:
+			outputFile << "[RECV COMPLETION]" << endl;
+			outputFile << "Recv Bytes: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
+			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
+			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
+			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
+			break;
+		case 1:
+			outputFile << "[SEND COMPLETION]" << endl;
+			outputFile << "Send Buff: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
+			outputFile << "Send Bytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
+			outputFile << "Send Offset: " << mtFileLogger.GetLogStruct(idx).ptr3 << endl;
+			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
+			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
+			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
+			break;
+		case 2:
+			outputFile << "[OnRecv]" << endl;
+			outputFile << "Send Buff(new): " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
+			outputFile << "RecvBytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
+			break;
+		case 3:
+			outputFile << "[SendPost]" << endl;
+			outputFile << "Send Buff: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
+			outputFile << "Send Bytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
+			outputFile << "Send Limits: " << mtFileLogger.GetLogStruct(idx).ptr3 << endl;
+			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
+			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
+			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
+			break;
+		case 4:
+			outputFile << "[SendPacekt]" << endl;
+			outputFile << "Send Buff: " << mtFileLogger.GetLogStruct(idx).ptr1 << endl;
+			outputFile << "Send Bytes: " << mtFileLogger.GetLogStruct(idx).ptr2 << endl;
+			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
+			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
+			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
+			break;
+		case 5:
+			outputFile << "[SEND COMPLETION (Intro)]" << endl;
+			outputFile << "Send Buff Size: " << mtFileLogger.GetLogStruct(idx).ptr4 << endl;
+			outputFile << "Send Buff Enq Offset: " << mtFileLogger.GetLogStruct(idx).ptr5 << endl;
+			outputFile << "Send Buff Deq Offset: " << mtFileLogger.GetLogStruct(idx).ptr6 << endl;
+		}
+	}
+
+	// 파일 닫기
+	outputFile.close();
+
+	std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
+}
+#endif

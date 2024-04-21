@@ -4,7 +4,7 @@
 #define JBUFF_DIRPTR_MANUAL_RESET
 #include "JBuffer.h"
 
-#define MT_FILE_LOG
+//#define MT_FILE_LOG
 #if defined(MT_FILE_LOG)
 #include "MTFileLogger.h"
 #endif
@@ -156,7 +156,7 @@ private:
 	static UINT __stdcall WorkerThreadFunc(void* arg);
 
 public:
-	virtual void OnWorkerTrehadCreate(HANDLE thHnd) = 0;	// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
+	virtual void OnWorkerTrehadCreate(HANDLE thHnd) {};		// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
 															// 런타임 중 추가적으로 생성되고, 소멸될 수 있는지는 Start 함수 flag에서 선택하도록...
 															// (컨텐츠 쪽에 결정권을 줌)
 	virtual bool OnConnectionRequest(/*IP, Port*/) = 0;
