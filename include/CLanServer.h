@@ -107,6 +107,7 @@ private:
 	HANDLE m_AcceptThread;
 	uint16 m_NumOfWorkerThreads;
 	vector<HANDLE> m_WorkerThreads;
+	map<DWORD, bool> m_WorkerThreadStartFlag;
 
 	/////////////////////////////////
 	// Exit
@@ -156,9 +157,12 @@ private:
 	static UINT __stdcall WorkerThreadFunc(void* arg);
 
 public:
-	virtual void OnWorkerTrehadCreate(HANDLE thHnd) {};		// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
-															// 런타임 중 추가적으로 생성되고, 소멸될 수 있는지는 Start 함수 flag에서 선택하도록...
-															// (컨텐츠 쪽에 결정권을 줌)
+	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };		// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
+																			// 런타임 중 추가적으로 생성되고, 소멸될 수 있는지는 Start 함수 flag에서 선택하도록...
+																			// (컨텐츠 쪽에 결정권을 줌)
+		
+	virtual void OnWorkerThreadStart() {};									// TLS 관련 초기화 작업 가능
+
 	virtual bool OnConnectionRequest(/*IP, Port*/) = 0;
 	virtual void OnClientJoin(uint64 sessionID) = 0;
 	virtual void OnClientLeave(uint64 sessionID) = 0;

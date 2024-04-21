@@ -80,10 +80,19 @@ bool CLanServer::Start()
 	}
 
 	m_AcceptThread = (HANDLE)_beginthreadex(NULL, 0, CLanServer::AcceptThreadFunc, this, 0, NULL);
-	cout << "[Thread Start] Accept Thread" << endl;
+	cout << "[Start Thread] Accept Thread" << endl;
 	for (uint16 idx = 0; idx < m_NumOfWorkerThreads; idx++) {
-		m_WorkerThreads[idx] = (HANDLE)_beginthreadex(NULL, 0, CLanServer::WorkerThreadFunc, this, 0, NULL);
-		cout << "[Thread Start] Worker Thread (thID: " << GetThreadId(m_WorkerThreads[idx]) << ")" << endl;
+		m_WorkerThreads[idx] = (HANDLE)_beginthreadex(NULL, 0, CLanServer::WorkerThreadFunc, this, CREATE_SUSPENDED, NULL);
+		DWORD thID = GetThreadId(m_WorkerThreads[idx]);
+		m_WorkerThreadStartFlag.insert({thID, true});
+		if (!OnWorkerThreadCreate(m_WorkerThreads[idx])) {
+			m_WorkerThreadStartFlag[thID] = false;
+			cout << "[Cant't Start Thread] Worker Thread (thID: " << GetThreadId(m_WorkerThreads[idx]) << ")" << endl;
+		}
+		else {
+			cout << "[Start Thread] Worker Thread (thID: " << GetThreadId(m_WorkerThreads[idx]) << ")" << endl;
+		}
+		ResumeThread(m_WorkerThreads[idx]);
 	}
 }
 
@@ -410,6 +419,12 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 {
 	CLanServer* clanserver = (CLanServer*)arg;
+	if (!clanserver->m_WorkerThreadStartFlag[GetThreadId(GetCurrentThread())]) {
+		return 0;
+	}
+
+	clanserver->OnWorkerThreadStart();
+
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool(0);	// 생성자에서 설정한 Default 값을 따름
 #endif
