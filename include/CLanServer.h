@@ -1,6 +1,8 @@
 #pragma once
 #include "SocketUtil.h"
 
+#include "CLanServerConfig.h"
+
 #define JBUFF_DIRPTR_MANUAL_RESET
 #include "JBuffer.h"
 
@@ -10,8 +12,6 @@
 #endif
 
 #include "TlsMemPool.h"
-
-#include "CLanServerConfig.h"
 
 #define SESSION_SENDBUFF_SYNC_TEST
 #if defined(SESSION_SENDBUFF_SYNC_TEST)

@@ -5,6 +5,8 @@ VisualStudioVersion = 17.9.34714.143
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLanServer", "CLanServer\CLanServer.vcxproj", "{95104AF0-56A3-4997-A99B-4473F0A0A357}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TlsMemPool", "..\MemoryPool\TlsMemPool\TlsMemPool.vcxproj", "{883CB26E-BC73-44C8-B883-0FFF663F6AD2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,14 @@ Global
 		{95104AF0-56A3-4997-A99B-4473F0A0A357}.Release|x64.Build.0 = Release|x64
 		{95104AF0-56A3-4997-A99B-4473F0A0A357}.Release|x86.ActiveCfg = Release|Win32
 		{95104AF0-56A3-4997-A99B-4473F0A0A357}.Release|x86.Build.0 = Release|Win32
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Debug|x64.ActiveCfg = Debug|x64
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Debug|x64.Build.0 = Debug|x64
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Debug|x86.ActiveCfg = Debug|Win32
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Debug|x86.Build.0 = Debug|Win32
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x64.ActiveCfg = Release|x64
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x64.Build.0 = Release|x64
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x86.ActiveCfg = Release|Win32
+		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
