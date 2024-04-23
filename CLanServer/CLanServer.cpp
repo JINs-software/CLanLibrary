@@ -94,6 +94,8 @@ bool CLanServer::Start()
 		}
 		ResumeThread(m_WorkerThreads[idx]);
 	}
+
+	OnWorkerThreadCreateDone();
 }
 
 void CLanServer::Stop()
@@ -133,7 +135,14 @@ void CLanServer::Stop()
 
 bool CLanServer::Disconnect(uint64 sessionID)
 {
-	return false;
+	uint16 idx = (uint16)sessionID;
+	stCLanSession* session = m_Sessions[idx];
+	
+	if (session != nullptr) {
+		// ...
+	}
+
+	return true;
 }
 
 bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendData)
@@ -340,10 +349,7 @@ CLanServer::stCLanSession* CLanServer::CreateNewSession(SOCKET sock)
 		newSessionID.idx = allocIdx;
 
 		newSessionID.incremental = m_Incremental++;
-		//newSession = new stCLanSession(sock, newSessionID);
-		//assert(m_Sessions[newSession->Id.idx] == NULL);
-		//m_Sessions[newSession->Id.idx] = newSession;
-
+		
 		newSession = m_Sessions[newSessionID.idx];
 		newSession->Init(sock, newSessionID);
 	}
@@ -477,6 +483,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					if (WSARecv(session->sock, &wsabuf, 1, NULL, &dwflag, &session->recvOverlapped, NULL) == SOCKET_ERROR) {
 						int errcode = WSAGetLastError();
 						if (errcode != WSA_IO_PENDING) {
+							InterlockedDecrement(&session->ioCnt);
 							if (session->ioCnt == 0) {
 								// 세션 삭제
 								clanserver->DeleteSession(session);

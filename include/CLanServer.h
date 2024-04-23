@@ -160,6 +160,7 @@ public:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };		// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
 																			// 런타임 중 추가적으로 생성되고, 소멸될 수 있는지는 Start 함수 flag에서 선택하도록...
 																			// (컨텐츠 쪽에 결정권을 줌)
+	virtual void OnWorkerThreadCreateDone() {};
 		
 	virtual void OnWorkerThreadStart() {};									// TLS 관련 초기화 작업 가능
 
