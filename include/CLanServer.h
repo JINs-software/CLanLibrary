@@ -35,16 +35,23 @@ class CLanServer
 		uint32 ioCnt;
 		uint32 sendFlag;
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		mutex sendBuffMtx;
+		mutex	sendBuffMtx;
+		SRWLOCK sendBuffSRWLock;
 #endif
 
-		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE){}
+		stCLanSession() 
+			: recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
+		{}
 		stCLanSession(SOCKET _sock, stSessionID _Id)
 			: sock(_sock), Id(_Id), recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE), sendFlag(0), ioCnt(0)
 		{
 			memcpy(&uiId, &Id, sizeof(Id));
 			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
 			memset(&sendOverlapped, 0, sizeof(WSAOVERLAPPED));
+
+#if defined(SESSION_SENDBUFF_SYNC_TEST)
+			InitializeSRWLock(&sendBuffSRWLock);
+#endif
 		}
 
 		// 내부 버퍼 외부 주입 방식
@@ -65,6 +72,10 @@ class CLanServer
 
 			ioCnt = 0;
 			sendFlag = false;
+
+#if defined(SESSION_SENDBUFF_SYNC_TEST)
+			InitializeSRWLock(&sendBuffSRWLock);
+#endif
 		}
 
 		void clearRecvOverlapped() {
@@ -117,7 +128,6 @@ private:
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 protected:
 	TlsMemPoolManager<JBuffer> m_SerialBuffPoolMgr;
-private:
 	DWORD m_SerialBuffPoolIdx;
 #endif
 
@@ -132,10 +142,12 @@ public:
 #endif
 
 public:
-	CLanServer(const char* serverIP, uint16 serverPort, 
-		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, 
-		uint16 maxOfConnections, bool beNagle = true,
-		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE
+	CLanServer(const char* serverIP, uint16 serverPort,
+		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections, 
+		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
+		size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+		bool beNagle = true
 	);
 	~CLanServer();
 	bool Start();

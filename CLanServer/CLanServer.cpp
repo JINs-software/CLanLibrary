@@ -4,11 +4,16 @@
 #include <fstream>
 
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort, 
-	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, 
-	uint16 maxOfConnections, bool beNagle,
-	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize )
+	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+	bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
+	size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultCapacity,
+	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
+	bool beNagle
+)
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false), m_SerialBuffPoolMgr(TLS_MEM_POOL_DEFAULT_ALLOC_SIZE, TLS_MEM_POOL_DEFAULT_SURPLUS_SIZE)
+	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), 
+	m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false), 
+	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag)
 #else
 	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false)
 #endif
@@ -151,7 +156,8 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendData)
 	stCLanSession* session = m_Sessions[idx];
 	if (session != nullptr) {
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		session->sendBuffMtx.lock();
+		//session->sendBuffMtx.lock();
+		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
 #if defined(SEND_RECV_RING_BUFF_COPY_MODE)
@@ -183,7 +189,8 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendData)
 		}
 #endif
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		session->sendBuffMtx.unlock();
+		//session->sendBuffMtx.unlock();
+		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
 		SendPost(sessionID);
@@ -200,7 +207,8 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendData) {
 	stCLanSession* session = m_Sessions[idx];
 	if (session != nullptr) {
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		session->sendBuffMtx.lock();
+		//session->sendBuffMtx.lock();
+		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
 #if defined(SEND_RECV_RING_BUFF_COPY_MODE)
@@ -242,7 +250,8 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendData) {
 		}
 #endif
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		session->sendBuffMtx.unlock();
+		//session->sendBuffMtx.unlock();
+		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
 		SendPost(sessionID);
@@ -286,7 +295,16 @@ void CLanServer::SendPost(uint64 sessionID)
 			InterlockedExchange(&session->sendFlag, 0);
 		}
 #elif defined(SEND_RECV_RING_BUFF_SERIALIZATION_MODE)
+
+
+#if defined(SESSION_SENDBUFF_SYNC_TEST)
+		AcquireSRWLockShared(&session->sendBuffSRWLock);
+#endif
 		DWORD numOfMessages = session->sendRingBuffer.GetUseSize() / sizeof(UINT_PTR);
+#if defined(SESSION_SENDBUFF_SYNC_TEST)
+		ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
+
 		WSABUF wsabuffs[WSABUF_ARRAY_DEFAULT_SIZE];
 
 		if (numOfMessages > 0) {
@@ -432,7 +450,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 	clanserver->OnWorkerThreadStart();
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool(0);	// 생성자에서 설정한 Default 값을 따름
+	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
 #endif
 
 	while (true) {
@@ -507,7 +525,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					InterlockedDecrement(&session->ioCnt);
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-					session->sendBuffMtx.lock();
+					//session->sendBuffMtx.lock();
+					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
 #if defined(SEND_RECV_RING_BUFF_COPY_MODE)
@@ -547,7 +566,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					}
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-					session->sendBuffMtx.unlock();
+					//session->sendBuffMtx.unlock();
+					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 				}
 				else {
