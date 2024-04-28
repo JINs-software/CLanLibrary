@@ -156,8 +156,8 @@ public:
 		return m_MaxOfSessions - m_SessionAllocIdQueue.size();
 	}
 	bool Disconnect(uint64 sessionID);
-	bool SendPacket(uint64 sessionID, JBuffer& sendData);
-	bool SendPacket(uint64 sessionID, JBuffer* sendData);
+	bool SendPacket(uint64 sessionID, JBuffer& sendDataRef);
+	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
 
 private:
 	void SendPost(uint64 sessionID);
@@ -167,7 +167,7 @@ private:
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);
 	static UINT __stdcall WorkerThreadFunc(void* arg);
-
+		
 public:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };		// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
 																			// 런타임 중 추가적으로 생성되고, 소멸될 수 있는지는 Start 함수 flag에서 선택하도록...
@@ -195,5 +195,7 @@ public:
 	int getAcceptTPS();
 	int getRecvMessageTPS();
 	int getSendMessageTPS();
+
+	void ConsoleLog();
 };
 

@@ -150,7 +150,7 @@ bool CLanServer::Disconnect(uint64 sessionID)
 	return true;
 }
 
-bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendData)
+bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendDataRef)
 {
 	uint16 idx = (uint16)sessionID;
 	stCLanSession* session = m_Sessions[idx];
@@ -179,7 +179,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendData)
 			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터를 Enqueue할 여유 사이즈 없음" << endl;
 			DebugBreak();
 		}
-		UINT_PTR sendDataPtr = (UINT_PTR)&sendData;
+		UINT_PTR sendDataPtr = (UINT_PTR)&sendDataRef;
 		uint32 enqSize = session->sendRingBuffer.Enqueue((BYTE*)(&sendDataPtr), sizeof(UINT_PTR));
 		if (enqSize < sizeof(UINT_PTR)) {
 			// 송신 링-버퍼에 송신 데이터를 복사할 수 있음을 확인했음에도 불구하고,
@@ -198,7 +198,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendData)
 
 	return true;
 }
-bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendData) {
+bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 #if defined(MT_FILE_LOG)
 	USHORT logIdx = mtFileLogger.AllocLogIndex();
 #endif
@@ -230,7 +230,6 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendData) {
 			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터를 Enqueue할 여유 사이즈 없음" << endl;
 			DebugBreak();
 		}
-		UINT_PTR sendDataPtr = (UINT_PTR)sendData;
 		uint32 enqSize = session->sendRingBuffer.Enqueue((BYTE*)&sendDataPtr, sizeof(UINT_PTR));
 #if defined(MT_FILE_LOG)
 		{
@@ -420,7 +419,9 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 					//wsabuf.len = 0;
 					DWORD dwFlag = 0;
 
-					newSession->ioCnt = 1;
+					//newSession->ioCnt = 1;
+					// => 세션 Release 관련 수업(24.04.08) 참고
+					// 세션 Init 함수에서 IOCnt를 1로 초기화하는 것이 맞는듯..
 					if (WSARecv(newSession->sock, &wsabuf, 1, NULL, &dwFlag, &newSession->recvOverlapped, NULL) == SOCKET_ERROR) {
 						int errcode = WSAGetLastError();
 						if (errcode != WSA_IO_PENDING) {
@@ -559,16 +560,18 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					}
 					//session->sendRingBuffer.DirectMoveDequeueOffset(session->sendOverlapped.Offset * sizeof(UINT_PTR));
 #endif
-					InterlockedExchange(&session->sendFlag, 0);
 
-					if (session->sendRingBuffer.GetUseSize() > 0) {
-						clanserver->SendPost(session->uiId);
-					}
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 					//session->sendBuffMtx.unlock();
 					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
+
+					InterlockedExchange(&session->sendFlag, 0);
+
+					if (session->sendRingBuffer.GetUseSize() > 0) {
+						clanserver->SendPost(session->uiId);
+					}
 				}
 				else {
 					DebugBreak();
@@ -675,3 +678,30 @@ void CLanServer::PrintMTFileLog() {
 	std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
 }
 #endif
+
+void CLanServer::ConsoleLog()
+{
+	static size_t logCnt = 0;
+
+	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
+	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
+	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
+	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
+	std::unordered_map<DWORD, stMemAllocInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
+	static COORD coord;
+	coord.X = 0;
+	coord.Y = 0;
+	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+	std::cout << "[Log Count] " << logCnt++ << "                              " << std::endl;
+	std::cout << "Total Alloc Mem Count : " << totalAllocMemCnt << "                            " << std::endl;
+	std::cout << "Total Free Mem Count  : " << totalFreeMemCnt << "                            " << std::endl;
+	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                            " << std::endl;
+	std::cout << "Total Decrement RefCnt: " << totalDecrementRefCnt << "                            " << std::endl;
+	std::cout << "------------------------------------------" << std::endl;
+	for (auto iter = memInfos.begin(); iter != memInfos.end(); iter++) {
+		std::cout << "[Thread: " << iter->first << "]                               " << std::endl;
+		std::cout << "TlsMemPoolUnitCnt : " << iter->second.tlsMemPoolUnitCnt << "                              " << std::endl;
+		std::cout << "LFMemPoolUnitCnt  : " << iter->second.lfMemPoolFreeCnt << "                              " << std::endl;
+		std::cout << "MallocCnt         : " << iter->second.mallocCnt << "                              " << std::endl;
+	}
+}
