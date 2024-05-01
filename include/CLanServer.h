@@ -169,7 +169,8 @@ public:
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
 
 private:
-	stCLanSession* GetSession(uint64 sessionID);
+	stCLanSession* AcquireSession(uint64 sessionID);
+	void ReturnSession(stCLanSession* session);
 
 	void SendPost(uint64 sessionID);
 

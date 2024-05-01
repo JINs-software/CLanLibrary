@@ -259,7 +259,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 	return true;
 }
 
-CLanServer::stCLanSession* CLanServer::GetSession(uint64 sessionID)
+CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 {
 	uint16 idx = (uint16)sessionID;
 	stCLanSession* session = m_Sessions[idx];
@@ -271,12 +271,22 @@ CLanServer::stCLanSession* CLanServer::GetSession(uint64 sessionID)
 	
 	if (session->uiId != sessionID) {
 		InterlockedDecrement((uint32*)&session->sessionRef);
-		return NULL;
+		return nullptr;
 	}
 
-	//if(session)
+	if (session->sessionRef.releaseFlag == 1) {
+		return nullptr;
+	}
 
-	return nullptr;
+	return session;
+}
+
+void CLanServer::ReturnSession(stCLanSession* session)
+{
+	InterlockedDecrement((uint32*)&session->sessionRef);
+	if (session->sessionRef.ioCnt == 0) {
+		DeleteSession(session->uiId);
+	}
 }
 
 void CLanServer::SendPost(uint64 sessionID)
@@ -413,7 +423,8 @@ void CLanServer::DeleteSession(stCLanSession* delSession)
 
 void CLanServer::DeleteSession(uint64 sessionID)
 {
-	stCLanSession* session = GetSession(sessionID);
+	uint16 idx = (uint16)sessionID;
+	stCLanSession* session = m_Sessions[idx];
 	if (session == nullptr) {
 		return;
 	}
@@ -424,6 +435,7 @@ void CLanServer::DeleteSession(uint64 sessionID)
 	uint32 org = InterlockedCompareExchange((uint32*)&session->sessionRef, chg, 0);
 	if (org == 0) {
 		// Delete(Release) 작업 수행..
+		DeleteSession(session);
 	}
 }
 
