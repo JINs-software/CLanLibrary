@@ -259,6 +259,26 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 	return true;
 }
 
+CLanServer::stCLanSession* CLanServer::GetSession(uint64 sessionID)
+{
+	uint16 idx = (uint16)sessionID;
+	stCLanSession* session = m_Sessions[idx];
+	if (session == nullptr) {
+		DebugBreak();
+	}
+
+	InterlockedIncrement((uint32*)&session->sessionRef);
+	
+	if (session->uiId != sessionID) {
+		InterlockedDecrement((uint32*)&session->sessionRef);
+		return NULL;
+	}
+
+	//if(session)
+
+	return nullptr;
+}
+
 void CLanServer::SendPost(uint64 sessionID)
 {
 	uint16 idx = (uint16)sessionID;
@@ -307,7 +327,8 @@ void CLanServer::SendPost(uint64 sessionID)
 		WSABUF wsabuffs[WSABUF_ARRAY_DEFAULT_SIZE];
 
 		if (numOfMessages > 0) {
-			InterlockedIncrement(&session->ioCnt);
+			//InterlockedIncrement(&session->ioCnt);
+			InterlockedIncrement((uint32*)&session->sessionRef);
 
 			int sendLimit = min(numOfMessages, WSABUF_ARRAY_DEFAULT_SIZE);
 			for (int idx = 0; idx < sendLimit; idx++) {
@@ -339,8 +360,10 @@ void CLanServer::SendPost(uint64 sessionID)
 			if (WSASend(session->sock, wsabuffs, sendLimit, NULL, 0, &session->sendOverlapped, NULL) == SOCKET_ERROR) {
 				int errcode = WSAGetLastError();
 				if (errcode != WSA_IO_PENDING) {
-					InterlockedDecrement(&session->ioCnt);
-					if (session->ioCnt == 0) {
+					//InterlockedDecrement(&session->ioCnt);
+					InterlockedIncrement((uint32*)&session->sessionRef);
+					//if (session->ioCnt == 0) {
+					if(session->sessionRef.ioCnt = 0) {
 						DeleteSession(session);
 						OnClientLeave(session->uiId);
 					}
@@ -386,6 +409,22 @@ void CLanServer::DeleteSession(stCLanSession* delSession)
 	EnterCriticalSection(&m_SessionAllocIdQueueCS);
 	m_SessionAllocIdQueue.push(allocatedIdx);
 	LeaveCriticalSection(&m_SessionAllocIdQueueCS);
+}
+
+void CLanServer::DeleteSession(uint64 sessionID)
+{
+	stCLanSession* session = GetSession(sessionID);
+	if (session == nullptr) {
+		return;
+	}
+
+	uint32 chg = 0;
+	((stSessionRef*)(&chg))->releaseFlag = 1;
+
+	uint32 org = InterlockedCompareExchange((uint32*)&session->sessionRef, chg, 0);
+	if (org == 0) {
+		// Delete(Release) 작업 수행..
+	}
 }
 
 UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
@@ -463,8 +502,9 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 		if (overlappedPtr != NULL) {
 			if (transferred == 0) {
 				// 연결 종료 판단
-				InterlockedDecrement(&session->ioCnt);
-				if (session->ioCnt == 0) {
+				InterlockedDecrement((uint32*)&session->sessionRef);
+				//if (session->ioCnt == 0) {
+				if(session->sessionRef.ioCnt == 0) {
 					// 세션 제거...
 					uint64 delSessionID = session->uiId;
 					clanserver->DeleteSession(session);
@@ -502,8 +542,10 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					if (WSARecv(session->sock, &wsabuf, 1, NULL, &dwflag, &session->recvOverlapped, NULL) == SOCKET_ERROR) {
 						int errcode = WSAGetLastError();
 						if (errcode != WSA_IO_PENDING) {
-							InterlockedDecrement(&session->ioCnt);
-							if (session->ioCnt == 0) {
+							//InterlockedDecrement(&session->ioCnt);
+							InterlockedDecrement((uint32*)&session->sessionRef);
+							//if (session->ioCnt == 0) {
+							if(session->sessionRef.ioCnt == 0) {
 								// 세션 삭제
 								clanserver->DeleteSession(session);
 								clanserver->OnClientLeave(session->uiId);
@@ -523,7 +565,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 						clanserver->mtFileLogger.GetLogStruct(logIdx).ptr6 = session->sendRingBuffer.GetDeqOffset();
 					}
 #endif
-					InterlockedDecrement(&session->ioCnt);
+					//InterlockedDecrement(&session->ioCnt);
+					InterlockedDecrement((uint32*)&session->sessionRef);
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 					//session->sendBuffMtx.lock();

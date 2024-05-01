@@ -24,6 +24,10 @@ class CLanServer
 		uint64 idx			: 16;
 		uint64 incremental	: 48;
 	};
+	struct stSessionRef {
+		int32 ioCnt			: 24;
+		int32 releaseFlag	: 8;
+	};
 	struct stCLanSession {
 		SOCKET sock;
 		stSessionID Id;
@@ -32,7 +36,8 @@ class CLanServer
 		WSAOVERLAPPED sendOverlapped;
 		JBuffer recvRingBuffer;
 		JBuffer sendRingBuffer;
-		uint32 ioCnt;
+		//uint32 ioCnt;
+		stSessionRef sessionRef;
 		uint32 sendFlag;
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 		mutex	sendBuffMtx;
@@ -43,8 +48,10 @@ class CLanServer
 			: recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
 		{}
 		stCLanSession(SOCKET _sock, stSessionID _Id)
-			: sock(_sock), Id(_Id), recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE), sendFlag(0), ioCnt(0)
+			: sock(_sock), Id(_Id), recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE), sendFlag(0)//, ioCnt(0)
 		{
+			sessionRef.ioCnt = 0;
+			sessionRef.releaseFlag = 0;
 			memcpy(&uiId, &Id, sizeof(Id));
 			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
 			memset(&sendOverlapped, 0, sizeof(WSAOVERLAPPED));
@@ -70,7 +77,9 @@ class CLanServer
 			recvRingBuffer.ClearBuffer();
 			sendRingBuffer.ClearBuffer();
 
-			ioCnt = 0;
+			//ioCnt = 0;
+			sessionRef.ioCnt = 0;
+			sessionRef.releaseFlag = 0;
 			sendFlag = false;
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
@@ -160,10 +169,13 @@ public:
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
 
 private:
+	stCLanSession* GetSession(uint64 sessionID);
+
 	void SendPost(uint64 sessionID);
 
 	stCLanSession* CreateNewSession(SOCKET sock);
 	void DeleteSession(stCLanSession* delSession);
+	void DeleteSession(uint64 sessionID);
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);
 	static UINT __stdcall WorkerThreadFunc(void* arg);
