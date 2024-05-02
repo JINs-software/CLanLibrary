@@ -18,6 +18,8 @@
 #include <mutex>
 #endif
 
+#include <assert.h>
+
 class CLanServer
 {
 	struct stSessionID {
@@ -25,8 +27,8 @@ class CLanServer
 		uint64 incremental	: 48;
 	};
 	struct stSessionRef {
-		int32 ioCnt			: 24;
-		int32 releaseFlag	: 8;
+		int32 ioCnt			: 24;		// 비동기 I/O가 요청된 상황 뿐 아니라 세션을 참조하는 상황에서도 해당 카운트를 증가시킨다.
+		int32 releaseFlag	: 8;		// 세션 삭제에 대한 제어를 위해서이다. 
 	};
 	struct stCLanSession {
 		SOCKET sock;
@@ -46,7 +48,11 @@ class CLanServer
 
 		stCLanSession() 
 			: recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
-		{}
+		{
+			Id.idx = 0;
+			sessionRef.ioCnt = 0;
+			sessionRef.releaseFlag = 0;
+		}
 		stCLanSession(SOCKET _sock, stSessionID _Id)
 			: sock(_sock), Id(_Id), recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE), sendFlag(0)//, ioCnt(0)
 		{
@@ -78,8 +84,10 @@ class CLanServer
 			sendRingBuffer.ClearBuffer();
 
 			//ioCnt = 0;
-			sessionRef.ioCnt = 0;
-			sessionRef.releaseFlag = 0;
+			//sessionRef.ioCnt = 0;
+			InterlockedIncrement((uint32*)&sessionRef);		// AcquireSession에서 session IOCnt를 1 감소 시키는 것과 연관
+
+			sessionRef.releaseFlag = 0;						// IOCnt를 증가시키고, releaseFlag를 0으로 초기화하는 순서가 중요하다.
 			sendFlag = false;
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
@@ -175,7 +183,7 @@ private:
 	void SendPost(uint64 sessionID);
 
 	stCLanSession* CreateNewSession(SOCKET sock);
-	void DeleteSession(stCLanSession* delSession);
+	//void DeleteSession(stCLanSession* delSession);
 	void DeleteSession(uint64 sessionID);
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);

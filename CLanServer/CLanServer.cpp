@@ -38,11 +38,11 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	//////////////////////////////////////////////////
 	// 세션 관리 초기화
 	//////////////////////////////////////////////////
-	for (uint16 idx = 0; idx < m_MaxOfSessions; idx++) {
+	for (uint16 idx = 1; idx <= m_MaxOfSessions; idx++) {		// sessionID의 인덱스 부 값이 0이라는 것은 존재하지 않은 세션이라는 보초값
 		m_SessionAllocIdQueue.push(idx);
 	}
-	m_Sessions.resize(m_MaxOfSessions, NULL);
-	for (uint16 idx = 0; idx < m_MaxOfSessions; idx++) {
+	m_Sessions.resize(m_MaxOfSessions + 1, NULL);
+	for (uint16 idx = 1; idx <= m_MaxOfSessions; idx++) {
 		m_Sessions[idx] = new stCLanSession;
 	}
 	InitializeCriticalSection(&m_SessionAllocIdQueueCS);
@@ -140,20 +140,16 @@ void CLanServer::Stop()
 
 bool CLanServer::Disconnect(uint64 sessionID)
 {
-	uint16 idx = (uint16)sessionID;
-	stCLanSession* session = m_Sessions[idx];
-	
-	if (session != nullptr) {
-		// ...
-	}
+	//stCLanSession* session = AcquireSession(sessionID);
 
 	return true;
 }
 
 bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendDataRef)
 {
-	uint16 idx = (uint16)sessionID;
-	stCLanSession* session = m_Sessions[idx];
+	//uint16 idx = (uint16)sessionID;
+	//stCLanSession* session = m_Sessions[idx];
+	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 		//session->sendBuffMtx.lock();
@@ -195,7 +191,11 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendDataRef)
 
 		SendPost(sessionID);
 	}
+	else {
+		return false;
+	}
 
+	ReturnSession(session);
 	return true;
 }
 bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
@@ -203,8 +203,9 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 	USHORT logIdx = mtFileLogger.AllocLogIndex();
 #endif
 
-	uint16 idx = (uint16)sessionID;
-	stCLanSession* session = m_Sessions[idx];
+	//uint16 idx = (uint16)sessionID;
+	//stCLanSession* session = m_Sessions[idx];
+	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 		//session->sendBuffMtx.lock();
@@ -255,26 +256,34 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 
 		SendPost(sessionID);
 	}
+	else {
+		return false;
+	}
+
+	ReturnSession(session);
 
 	return true;
 }
 
 CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 {
-	uint16 idx = (uint16)sessionID;
-	stCLanSession* session = m_Sessions[idx];
-	if (session == nullptr) {
-		DebugBreak();
+	uint16 idx = (uint16)sessionID;								
+	stCLanSession* session = m_Sessions[idx];					// 세션 ID의 인덱스 파트를 통해 세션 획득
+	if (session == nullptr) {									// AcquireSession을 호출하는 시점에서 찾고자 하였던 세션을 획득하였다는 보장은 할 수 없음
+		DebugBreak();											// (이미 삭제된 세션이거나, 삭제된 후 같은 인덱스 자리에 재활용된 세션일 수 있음)
 	}
 
-	InterlockedIncrement((uint32*)&session->sessionRef);
+	InterlockedIncrement((uint32*)&session->sessionRef);		// 세션 IOCnt 증가
+																// 세션 IOCnt를 증가한 시점 이후에는 AcquireSession을 호출하면서 찾고자 하였던 세션이든,
+																// 같은 인덱스 자리에 재활용된 세션이든 삭제되지 않는 보장을 할 수 있음
 	
-	if (session->uiId != sessionID) {
-		InterlockedDecrement((uint32*)&session->sessionRef);
+	if (session->uiId != sessionID) {							// 찾고자 하였던 세션인지 확인, 아닌 경우 증가 시켰던 IOCnt를 감소 시키고 nullptr 반환
+		//InterlockedDecrement((uint32*)&session->sessionRef);
+		ReturnSession(session);
 		return nullptr;
 	}
 
-	if (session->sessionRef.releaseFlag == 1) {
+	if (session->sessionRef.releaseFlag == 1) {					// 삭제가 진행 중인 세션이거나 이미 삭제된 세션이라면 nullptr 반환
 		return nullptr;
 	}
 
@@ -284,7 +293,8 @@ CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 void CLanServer::ReturnSession(stCLanSession* session)
 {
 	InterlockedDecrement((uint32*)&session->sessionRef);
-	if (session->sessionRef.ioCnt == 0) {
+	assert(session->sessionRef.ioCnt >= 0);
+	if (session->sessionRef.ioCnt == 0) {					// 찾고자 하던 세션이 아닌 다른 세션이 ioCnt가 0이 된다면?!
 		DeleteSession(session->uiId);
 	}
 }
@@ -373,9 +383,11 @@ void CLanServer::SendPost(uint64 sessionID)
 					//InterlockedDecrement(&session->ioCnt);
 					InterlockedIncrement((uint32*)&session->sessionRef);
 					//if (session->ioCnt == 0) {
-					if(session->sessionRef.ioCnt = 0) {
-						DeleteSession(session);
-						OnClientLeave(session->uiId);
+
+					assert(session->sessionRef.ioCnt >= 0);
+					if(session->sessionRef.ioCnt == 0) {
+						DeleteSession(sessionID);
+						//OnClientLeave(session->uiId); // -> DeleteSession 함수 내로..
 					}
 				}
 			}
@@ -396,11 +408,11 @@ CLanServer::stCLanSession* CLanServer::CreateNewSession(SOCKET sock)
 	if (!m_SessionAllocIdQueue.empty() /* && (m_Incremental & 0xFFFF'0000'0000'0000) == 0 */) {
 		uint16 allocIdx = m_SessionAllocIdQueue.front();
 		m_SessionAllocIdQueue.pop();
-		newSessionID.idx = allocIdx;
-
-		newSessionID.incremental = m_Incremental++;
 		
-		newSession = m_Sessions[newSessionID.idx];
+		newSession = m_Sessions[allocIdx];
+
+		newSessionID.idx = allocIdx;
+		newSessionID.incremental = m_Incremental++;
 		newSession->Init(sock, newSessionID);
 	}
 	LeaveCriticalSection(&m_SessionAllocIdQueueCS);
@@ -408,35 +420,44 @@ CLanServer::stCLanSession* CLanServer::CreateNewSession(SOCKET sock)
 	return newSession;
 }
 
-void CLanServer::DeleteSession(stCLanSession* delSession)
-{
-	// 세션 삭제
-	uint16 allocatedIdx = delSession->Id.idx;
-	closesocket(m_Sessions[allocatedIdx]->sock);
-	//delete delSession;
-	//m_Sessions[allocatedIdx] = NULL;
-
-	EnterCriticalSection(&m_SessionAllocIdQueueCS);
-	m_SessionAllocIdQueue.push(allocatedIdx);
-	LeaveCriticalSection(&m_SessionAllocIdQueueCS);
-}
+//void CLanServer::DeleteSession(stCLanSession* delSession)
+//{
+//	// 세션 삭제
+//	uint16 allocatedIdx = delSession->Id.idx;
+//	closesocket(m_Sessions[allocatedIdx]->sock);
+//	//delete delSession;
+//	//m_Sessions[allocatedIdx] = NULL;
+//
+//	EnterCriticalSection(&m_SessionAllocIdQueueCS);
+//	m_SessionAllocIdQueue.push(allocatedIdx);
+//	LeaveCriticalSection(&m_SessionAllocIdQueueCS);
+//}
 
 void CLanServer::DeleteSession(uint64 sessionID)
 {
 	uint16 idx = (uint16)sessionID;
-	stCLanSession* session = m_Sessions[idx];
-	if (session == nullptr) {
+	stCLanSession* delSession = m_Sessions[idx];
+	if (delSession == nullptr) {
 		return;
 	}
 
 	uint32 chg = 0;
 	((stSessionRef*)(&chg))->releaseFlag = 1;
 
-	uint32 org = InterlockedCompareExchange((uint32*)&session->sessionRef, chg, 0);
+	uint32 org = InterlockedCompareExchange((uint32*)&delSession->sessionRef, chg, 0);
 	if (org == 0) {
-		// Delete(Release) 작업 수행..
-		DeleteSession(session);
+		// 세션 삭제
+		uint16 allocatedIdx = delSession->Id.idx;
+		closesocket(m_Sessions[allocatedIdx]->sock);
+
+		EnterCriticalSection(&m_SessionAllocIdQueueCS);
+		m_SessionAllocIdQueue.push(allocatedIdx);
+		LeaveCriticalSection(&m_SessionAllocIdQueueCS);
+
+		delSession->Id.idx = 0;
 	}
+
+	OnClientLeave(sessionID);
 }
 
 UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
@@ -516,11 +537,12 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 				// 연결 종료 판단
 				InterlockedDecrement((uint32*)&session->sessionRef);
 				//if (session->ioCnt == 0) {
+				assert(session->sessionRef.ioCnt >= 0);
 				if(session->sessionRef.ioCnt == 0) {
 					// 세션 제거...
-					uint64 delSessionID = session->uiId;
-					clanserver->DeleteSession(session);
-					clanserver->OnClientLeave(delSessionID);
+					//clanserver->DeleteSession(session);
+					//clanserver->OnClientLeave(session->uiId);
+					clanserver->DeleteSession(session->uiId);
 				}
 			}
 			else {
@@ -557,10 +579,12 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 							//InterlockedDecrement(&session->ioCnt);
 							InterlockedDecrement((uint32*)&session->sessionRef);
 							//if (session->ioCnt == 0) {
+							assert(session->sessionRef.ioCnt >= 0);
 							if(session->sessionRef.ioCnt == 0) {
 								// 세션 삭제
-								clanserver->DeleteSession(session);
-								clanserver->OnClientLeave(session->uiId);
+								//clanserver->DeleteSession(session);
+								//clanserver->OnClientLeave(session->uiId);
+								clanserver->DeleteSession(session->uiId);
 							}
 						}
 					}
@@ -753,10 +777,16 @@ void CLanServer::ConsoleLog()
 	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                            " << std::endl;
 	std::cout << "Total Decrement RefCnt: " << totalDecrementRefCnt << "                            " << std::endl;
 	std::cout << "------------------------------------------" << std::endl;
+	size_t totalUnitCnt = 0;
 	for (auto iter = memInfos.begin(); iter != memInfos.end(); iter++) {
 		std::cout << "[Thread: " << iter->first << "]                               " << std::endl;
 		std::cout << "TlsMemPoolUnitCnt : " << iter->second.tlsMemPoolUnitCnt << "                              " << std::endl;
 		std::cout << "LFMemPoolUnitCnt  : " << iter->second.lfMemPoolFreeCnt << "                              " << std::endl;
 		std::cout << "MallocCnt         : " << iter->second.mallocCnt << "                              " << std::endl;
+
+		totalUnitCnt += iter->second.tlsMemPoolUnitCnt;
+		totalUnitCnt += iter->second.lfMemPoolFreeCnt;
 	}
+	std::cout << "------------------------------------------" << std::endl;
+	std::cout << "Total Unit Cnt: " << totalUnitCnt << std::endl;
 }
