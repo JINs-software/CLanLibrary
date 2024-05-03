@@ -450,6 +450,15 @@ void CLanServer::DeleteSession(uint64 sessionID)
 		uint16 allocatedIdx = delSession->Id.idx;
 		closesocket(m_Sessions[allocatedIdx]->sock);
 
+		// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+		while (delSession->sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
+			JBuffer* sendPacekt;
+			delSession->sendRingBuffer >> sendPacekt;
+#if defined(ALLOC_MEM_LOG)
+			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
+#endif
+		}
+
 		EnterCriticalSection(&m_SessionAllocIdQueueCS);
 		m_SessionAllocIdQueue.push(allocatedIdx);
 		LeaveCriticalSection(&m_SessionAllocIdQueueCS);
@@ -632,7 +641,12 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+
+#if defined(ALLOC_MEM_LOG)
+						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+#else
 						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
+#endif
 #else
 						delete sendBuff;
 #endif
@@ -766,7 +780,7 @@ void CLanServer::ConsoleLog()
 	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
 	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
 	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
-	std::unordered_map<DWORD, stMemAllocInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
+	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
 	static COORD coord;
 	coord.X = 0;
 	coord.Y = 0;
@@ -794,10 +808,45 @@ void CLanServer::ConsoleLog()
 
 void CLanServer::MemAllocLog()
 {
-	m_SerialBuffPoolMgr.m_AllocLogMtx.lock();
-	for (auto iter = m_SerialBuffPoolMgr.m_AllocLog.begin(); iter != m_SerialBuffPoolMgr.m_AllocLog.end(); iter++) {
-		std::cout << iter->second << "                              " << std::endl;
+	time_t now = time(0);
+	struct tm timeinfo;
+	char buffer[80];
+	localtime_s(&timeinfo, &now);
+	strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", &timeinfo);
+	std::string currentDateTime = std::string(buffer);
+
+	// 파일 경로 생성
+	std::string filePath = "./" + currentDateTime + ".txt";
+
+	// 파일 스트림 열기
+	std::ofstream outputFile(filePath);
+
+	if (!outputFile) {
+		std::cerr << "파일을 열 수 없습니다." << std::endl;
+		return;
 	}
-	DebugBreak();
-	m_SerialBuffPoolMgr.m_AllocLogMtx.unlock();
+
+	outputFile << currentDateTime << std::endl;
+
+	std::vector<stAllocMemLog>& allocMemLog = m_SerialBuffPoolMgr.m_AllocLog;
+	for (USHORT i = 0; i < allocMemLog.size(); i++) {
+		if (allocMemLog[i].address == 0) {
+			break;
+		}
+
+		outputFile << "address: " << allocMemLog[i].address << " | refCnt: " << allocMemLog[i].refCnt << std::endl;
+		outputFile << "log: " << allocMemLog[i].log  << std::endl;
+	}
+
+	outputFile << "-----------------------------------------------------------------" << std::endl;
+
+	std::map<UINT_PTR, short>& allocLogMap = m_SerialBuffPoolMgr.m_AllocMap;
+	for (auto iter = allocLogMap.begin(); iter != allocLogMap.end(); iter++) {
+		outputFile << "address: " << iter->first << " | refCnt: " << iter->second << std::endl;
+	}
+
+	// 파일 닫기
+	outputFile.close();
+
+	std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
 }
