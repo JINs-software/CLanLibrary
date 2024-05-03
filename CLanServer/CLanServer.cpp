@@ -771,22 +771,33 @@ void CLanServer::ConsoleLog()
 	coord.X = 0;
 	coord.Y = 0;
 	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
-	std::cout << "[Log Count] " << logCnt++ << "                              " << std::endl;
+	std::cout << "[Log Count] " << logCnt++ << "                                                " << std::endl;
 	std::cout << "Total Alloc Mem Count : " << totalAllocMemCnt << "                            " << std::endl;
-	std::cout << "Total Free Mem Count  : " << totalFreeMemCnt << "                            " << std::endl;
-	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                            " << std::endl;
-	std::cout << "Total Decrement RefCnt: " << totalDecrementRefCnt << "                            " << std::endl;
-	std::cout << "------------------------------------------" << std::endl;
+	std::cout << "Total Free Mem Count  : " << totalFreeMemCnt << "                             " << std::endl;
+	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                        " << std::endl;
+	std::cout << "Total Decrement RefCnt: " << totalDecrementRefCnt << "                        " << std::endl;
+	std::cout << "------------------------------------------                                    " << std::endl;
 	size_t totalUnitCnt = 0;
 	for (auto iter = memInfos.begin(); iter != memInfos.end(); iter++) {
-		std::cout << "[Thread: " << iter->first << "]                               " << std::endl;
-		std::cout << "TlsMemPoolUnitCnt : " << iter->second.tlsMemPoolUnitCnt << "                              " << std::endl;
-		std::cout << "LFMemPoolUnitCnt  : " << iter->second.lfMemPoolFreeCnt << "                              " << std::endl;
-		std::cout << "MallocCnt         : " << iter->second.mallocCnt << "                              " << std::endl;
+		std::cout << "[Thread: " << iter->first << "]                                           " << std::endl;
+		std::cout << "TlsMemPoolUnitCnt : " << iter->second.tlsMemPoolUnitCnt << "              " << std::endl;
+		std::cout << "LFMemPoolUnitCnt  : " << iter->second.lfMemPoolFreeCnt << "               " << std::endl;
+		std::cout << "MallocCnt         : " << iter->second.mallocCnt << "                      " << std::endl;
 
 		totalUnitCnt += iter->second.tlsMemPoolUnitCnt;
 		totalUnitCnt += iter->second.lfMemPoolFreeCnt;
 	}
-	std::cout << "------------------------------------------" << std::endl;
-	std::cout << "Total Unit Cnt: " << totalUnitCnt << std::endl;
+	std::cout << "------------------------------------------                                    " << std::endl;
+	std::cout << "Total Unit Cnt: " << totalUnitCnt << "                                        " <<std::endl;
+	std::cout << "==========================================                                    " << std::endl;
+}
+
+void CLanServer::MemAllocLog()
+{
+	m_SerialBuffPoolMgr.m_AllocLogMtx.lock();
+	for (auto iter = m_SerialBuffPoolMgr.m_AllocLog.begin(); iter != m_SerialBuffPoolMgr.m_AllocLog.end(); iter++) {
+		std::cout << iter->second << "                              " << std::endl;
+	}
+	DebugBreak();
+	m_SerialBuffPoolMgr.m_AllocLogMtx.unlock();
 }

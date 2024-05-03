@@ -218,5 +218,6 @@ public:
 	int getSendMessageTPS();
 
 	void ConsoleLog();
+	void MemAllocLog();
 };
 
