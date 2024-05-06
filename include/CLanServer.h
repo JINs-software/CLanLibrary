@@ -11,6 +11,8 @@
 #include "MTFileLogger.h"
 #endif
 
+#define SESSION_RELEASE_LOG
+
 #include "TlsMemPool.h"
 
 #define SESSION_SENDBUFF_SYNC_TEST
@@ -45,7 +47,6 @@ class CLanServer
 		mutex	sendBuffMtx;
 		SRWLOCK sendBuffSRWLock;
 #endif
-
 		stCLanSession() 
 			: recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
 		{
@@ -105,6 +106,23 @@ class CLanServer
 
 	// IOCP 모델을 사용하고, 내부에 작업자 스레드들을 사용
 private:
+#if defined(SESSION_RELEASE_LOG)
+	struct stSessionRelaseLog {
+		bool createFlag = false;
+		bool releaseSuccess;
+		uint64 sessionID = 0;
+		uint64 sessionIndex;
+		uint64 sessionIncrement;
+		int32 iocnt;
+		int32 releaseFlag;
+		string log = "";
+	};
+	std::vector<stSessionRelaseLog> m_ReleaseLog;
+	USHORT m_ReleaseLogIndex;
+	std::set<uint64> m_CreatedSession;
+	std::mutex m_CreatedSessionMtx;
+#endif
+
 	/////////////////////////////////
 	// Networking
 	/////////////////////////////////
@@ -158,6 +176,7 @@ public:
 	void PrintMTFileLog();
 #endif
 
+
 public:
 	CLanServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections, 
@@ -184,7 +203,11 @@ private:
 
 	stCLanSession* CreateNewSession(SOCKET sock);
 	//void DeleteSession(stCLanSession* delSession);
+#if defined(SESSION_RELEASE_LOG)
+	void DeleteSession(uint64 sessionID, string log = "");
+#else
 	void DeleteSession(uint64 sessionID);
+#endif
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);
 	static UINT __stdcall WorkerThreadFunc(void* arg);
@@ -219,5 +242,8 @@ public:
 
 	void ConsoleLog();
 	void MemAllocLog();
+#if defined(SESSION_RELEASE_LOG)
+	void SessionReleaseLog();
+#endif
 };
 
