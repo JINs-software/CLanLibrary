@@ -963,7 +963,7 @@ void CLanServer::SessionReleaseLog() {
 	struct tm timeinfo;
 	char buffer[80];
 	localtime_s(&timeinfo, &now);
-	strftime(buffer, sizeof(buffer), "MemAllocLog-%Y-%m-%d_%H-%M-%S", &timeinfo);
+	strftime(buffer, sizeof(buffer), "SessionReleaseLog-%Y-%m-%d_%H-%M-%S", &timeinfo);
 	std::string currentDateTime = std::string(buffer);
 
 	// 파일 경로 생성
@@ -990,11 +990,28 @@ void CLanServer::SessionReleaseLog() {
 			continue;
 		}
 
+		std::cout << "-------------------------------------------------" << std::endl;
 		if (m_ReleaseLog[i].createFlag) {
-			std::cout << ""
+			std::cout << "[Create Session] sessionID: " << to_string(m_ReleaseLog[i].sessionID) << std::endl;
+			std::cout << "Index:        " << m_ReleaseLog[i].sessionIndex << std::endl;
+			std::cout << "Increment:    " << m_ReleaseLog[i].sessionIncrement << std::endl;
+			std::cout << "Release Flag: " << m_ReleaseLog[i].releaseFlag << std::endl;
+			std::cout << "IO Cnt:       " << m_ReleaseLog[i].iocnt << std::endl;
+			
 		}
 		else {
-
+			if (m_ReleaseLog[i].releaseSuccess) {
+				std::cout << "[Release Success] sessionID: " << to_string(m_ReleaseLog[i].sessionID) << std::endl;
+			}
+			else {
+				std::cout << "[Release Fail] sessionID: " << to_string(m_ReleaseLog[i].sessionID) << std::endl;
+			}
+			
+			std::cout << "Log: " << m_ReleaseLog[i].log << std::endl;
+			std::cout << "Index:        " << m_ReleaseLog[i].sessionIndex << std::endl;
+			std::cout << "Increment:    " << m_ReleaseLog[i].sessionIncrement << std::endl;
+			std::cout << "Release Flag: " << m_ReleaseLog[i].releaseFlag << std::endl;
+			std::cout << "IO Cnt:       " << m_ReleaseLog[i].iocnt << std::endl;
 		}
 	}
 
