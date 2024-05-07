@@ -110,6 +110,7 @@ private:
 	struct stSessionRelaseLog {
 		bool createFlag = false;
 		bool releaseSuccess;
+		bool disconnect = false;
 		uint64 sessionID = 0;
 		uint64 sessionIndex;
 		uint64 sessionIncrement;
@@ -191,8 +192,12 @@ public:
 	inline int GetSessionCount() {
 		return m_MaxOfSessions - m_SessionAllocIdQueue.size();
 	}
-	bool Disconnect(uint64 sessionID);
-	bool SendPacket(uint64 sessionID, JBuffer& sendDataRef);
+#if defined(SESSION_RELEASE_LOG)
+	void Disconnect(uint64 sessionID, string log = "");
+#else
+	void Disconnect(uint64 sessionID);
+#endif
+	//bool SendPacket(uint64 sessionID, JBuffer& sendDataRef);
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
 
 private:
@@ -202,11 +207,10 @@ private:
 	void SendPost(uint64 sessionID);
 
 	stCLanSession* CreateNewSession(SOCKET sock);
-	//void DeleteSession(stCLanSession* delSession);
 #if defined(SESSION_RELEASE_LOG)
-	void DeleteSession(uint64 sessionID, string log = "");
+	bool DeleteSession(uint64 sessionID, string log = "");
 #else
-	void DeleteSession(uint64 sessionID);
+	bool DeleteSession(uint64 sessionID);
 #endif
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);
