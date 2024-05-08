@@ -550,14 +550,16 @@ bool CLanServer::DeleteSession(uint64 sessionID, string log) {
 		uint16 allocatedIdx = delSession->Id.idx;
 		closesocket(m_Sessions[allocatedIdx]->sock);
 
-		// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
-		while (delSession->sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
-			JBuffer* sendPacekt;
-			delSession->sendRingBuffer >> sendPacekt;
-#if defined(ALLOC_MEM_LOG)
-			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
-#endif
-		}
+//		// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+//		while (delSession->sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
+//			JBuffer* sendPacekt;
+//			delSession->sendRingBuffer >> sendPacekt;
+//#if defined(ALLOC_MEM_LOG)
+//			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
+//#endif
+//		}
+		// => OnDeleteSendPacket
+		OnDeleteSendPacket(sessionID, delSession->sendRingBuffer);
 
 		EnterCriticalSection(&m_SessionAllocIdQueueCS);
 		m_SessionAllocIdQueue.push(allocatedIdx);
@@ -836,6 +838,18 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 	}
 
 	return 0;
+}
+
+void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
+{
+	// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+	while (sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
+		JBuffer* sendPacekt;
+		sendRingBuffer >> sendPacekt;
+#if defined(ALLOC_MEM_LOG)
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
+#endif
+	}
 }
 
 

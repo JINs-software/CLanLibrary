@@ -226,6 +226,7 @@ public:
 
 	virtual bool OnConnectionRequest(/*IP, Port*/) = 0;
 	virtual void OnClientJoin(uint64 sessionID) = 0;
+	virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer);
 	virtual void OnClientLeave(uint64 sessionID) = 0;
 	virtual void OnRecv(uint64 sessionID, JBuffer& recvBuff) = 0;
 	//virtual void OnSend() = 0;
