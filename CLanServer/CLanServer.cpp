@@ -624,6 +624,13 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 	while (true) {
 		SOCKADDR_IN clientAddr;
 		int addrLen = sizeof(clientAddr);
+		// 세션 초과 -> down client 막기 임시 방편
+		while (true) {
+			if (clanserver->OnConnectionRequest()) {
+				break;
+			}
+		}
+		//////////////////////////////////////////
 		SOCKET clientSock = ::accept(clanserver->m_ListenSock, (sockaddr*)&clientAddr, &addrLen);
 		if (clientSock != INVALID_SOCKET) {
 			if (!clanserver->OnConnectionRequest()) {
@@ -661,6 +668,9 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 							DebugBreak();
 						}
 					}
+				}
+				else {
+					DebugBreak();
 				}
 			}
 		}
@@ -838,6 +848,19 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 	}
 
 	return 0;
+}
+
+//EnterCriticalSection(&m_SessionAllocIdQueueCS);
+//if (!m_SessionAllocIdQueue.empty()
+bool CLanServer::OnConnectionRequest(/*IP, Port*/) {
+	bool ret = true;
+	EnterCriticalSection(&m_SessionAllocIdQueueCS);
+	if (m_SessionAllocIdQueue.empty()) {
+		ret = false;
+	}
+	LeaveCriticalSection(&m_SessionAllocIdQueueCS);
+
+	return ret;
 }
 
 void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)

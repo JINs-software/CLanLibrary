@@ -224,7 +224,7 @@ public:
 		
 	virtual void OnWorkerThreadStart() {};									// TLS 관련 초기화 작업 가능
 
-	virtual bool OnConnectionRequest(/*IP, Port*/) = 0;
+	virtual bool OnConnectionRequest(/*IP, Port*/);
 	virtual void OnClientJoin(uint64 sessionID) = 0;
 	virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer);
 	virtual void OnClientLeave(uint64 sessionID) = 0;
