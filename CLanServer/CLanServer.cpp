@@ -300,18 +300,22 @@ CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 		DebugBreak();											// (이미 삭제된 세션이거나, 삭제된 후 같은 인덱스 자리에 재활용된 세션일 수 있음)
 	}
 	else {
-		InterlockedIncrement((uint32*)&session->sessionRef);		// 세션 IOCnt 증가
+		int32 ioCnt = InterlockedIncrement((uint32*)&session->sessionRef);		// 세션 IOCnt 증가
 		// 세션 IOCnt를 증가한 시점 이후에는 AcquireSession을 호출하면서 찾고자 하였던 세션이든,
 		// 같은 인덱스 자리에 재활용된 세션이든 삭제되지 않는 보장을 할 수 있음
 
 		if (session->uiId != sessionID) {							// 찾고자 하였던 세션인지 확인, 아닌 경우 증가 시켰던 IOCnt를 감소 시키고 nullptr 반환
-			assert(session->sessionRef.ioCnt >= 1);
-			if (session->sessionRef.ioCnt == 1) {
+			assert(ioCnt >= 1);
+
+			ioCnt = InterlockedDecrement((uint32*)&session->sessionRef);
+			if (ioCnt == 0) {
+				InterlockedIncrement((uint32*)&session->sessionRef);
 				Disconnect(session->uiId, "AcquireSession(다른 스레드) Disconnect");
 			}
-			else {
-				InterlockedDecrement((uint32*)&session->sessionRef);
+			else if (ioCnt < 0) {
+				DebugBreak();
 			}
+
 			return nullptr;
 		}
 
@@ -349,6 +353,9 @@ void CLanServer::ReturnSession(stCLanSession* session)
 	else if (ioCnt < 0) {
 		DebugBreak();
 	}
+	// (1) ioCnt == 1인 상황, 이 뜻은 AcquireSession에 의해 증가된 ioCnt만 남았다는 뜻
+	// (2) ioCnt == 1인 상황에서 InterlockedDecrement에 의해 0으로 변경되었을 때,
+	//     다른 iocp 작업자 스레드에 의해 감소될 상황은 없어보임. 이미 ioCnt == 0인 상황에서 AcquireSession으로 1이 된 상황이기에
 }
 
 void CLanServer::SendPost(uint64 sessionID)
@@ -785,8 +792,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 						clanserver->mtFileLogger.GetLogStruct(logIdx).ptr6 = session->sendRingBuffer.GetDeqOffset();
 					}
 #endif
-					//InterlockedDecrement(&session->ioCnt);
-					InterlockedDecrement((uint32*)&session->sessionRef);
+
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 					//session->sendBuffMtx.lock();
@@ -839,6 +845,29 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 					if (session->sendRingBuffer.GetUseSize() > 0) {
 						clanserver->SendPost(session->uiId);
+					}
+
+					//InterlockedDecrement((uint32*)&session->sessionRef);
+					// 송신 완료 통지에 있어서도 ioCnt 감소 후 ioCnt를 확인하고,
+					// ioCnt == 0 일 시 연결 종료 판단 -> DeleteSession 호출이 필요함이 식별됨.
+					// 채팅 더미 Disconnect 모드로 수행하다 Connect re-try를 stop한 경우 
+					// 더미 측에선 연결된 클라이언트가 0임에도 불구하고 서버 상에 삭제되지 않은 세션이 발견됨.
+					// 이 세션의 ioCnt == 0, releaseFlag == 0, sendFlag == 0 이 였음.
+					// 송신 완료 통지 후 ioCnt가 1 -> 0으로 변경된 상황에서 SendPost나 다른 스레드에서의 세션 참조가 없는 상황에선
+					// ioCnt == 0인 상태로 삭제되지 않고 남아있을 수 있음이 의심됨.
+					InterlockedDecrement((uint32*)&session->sessionRef);
+					assert(session->sessionRef.ioCnt >= 0);
+					if (session->sessionRef.ioCnt == 0) {
+						// 세션 제거...
+#if defined(SESSION_RELEASE_LOG)
+						if (clanserver->DeleteSession(session->uiId, "송신 완료 후 ioCnt 감소 -> ioCnt == 0")) {
+							clanserver->OnClientLeave(session->uiId);
+						}
+
+#else
+						clanserver->DeleteSession(session->uiId);
+						clanserver->OnClientLeave(session->uiId);
+#endif
 					}
 				}
 				else {
