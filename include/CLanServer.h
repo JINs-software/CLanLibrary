@@ -44,8 +44,8 @@ class CLanServer
 		stSessionRef sessionRef;
 		uint32 sendFlag;
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		mutex	sendBuffMtx;
 		SRWLOCK sendBuffSRWLock;
+		// => 추후 송신 버퍼를 락-프리 큐로 변경, 송신 버퍼를 위한 동기화 객체 생략
 #endif
 		stCLanSession() 
 			: recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
@@ -135,9 +135,9 @@ private:
 	uint16 m_MaxOfSessions;
 	queue<uint16> m_SessionAllocIdQueue;
 	CRITICAL_SECTION m_SessionAllocIdQueueCS;
+
 	uint64 m_Incremental;
 	vector<stCLanSession*> m_Sessions;
-	CRITICAL_SECTION m_SessionCS;
 	
 	uint32 m_SessionSendBufferSize;
 	uint32 m_SessionRecvBufferSize;

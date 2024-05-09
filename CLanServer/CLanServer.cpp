@@ -51,7 +51,6 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 		m_Sessions[idx] = new stCLanSession;
 	}
 	InitializeCriticalSection(&m_SessionAllocIdQueueCS);
-	InitializeCriticalSection(&m_SessionCS);
 
 	//////////////////////////////////////////////////
 	// IOCP 객체 초기화
@@ -136,7 +135,6 @@ void CLanServer::Stop()
 	}
 
 	DeleteCriticalSection(&m_SessionAllocIdQueueCS);
-	DeleteCriticalSection(&m_SessionCS);
 	CloseHandle(m_IOCP);
 
 	WSACleanup();
@@ -171,60 +169,6 @@ void CLanServer::Disconnect(uint64 sessionID)
 }
 #endif
 
-//bool CLanServer::SendPacket(uint64 sessionID, JBuffer& sendDataRef)
-//{
-//	//uint16 idx = (uint16)sessionID;
-//	//stCLanSession* session = m_Sessions[idx];
-//	stCLanSession* session = AcquireSession(sessionID);
-//	if (session != nullptr) {
-//#if defined(SESSION_SENDBUFF_SYNC_TEST)
-//		//session->sendBuffMtx.lock();
-//		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
-//#endif
-//
-//#if defined(SEND_RECV_RING_BUFF_COPY_MODE)
-//		if (session->sendRingBuffer.GetFreeSize() < sendData.GetUseSize()) {
-//			// 송신 링-버퍼에 송신 데이터를 Enqueue(복사)할 여유 분이 없음(송신 버퍼 초과)
-//			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터를 Enqueue할 여유 사이즈 없음" << endl;
-//			DebugBreak();
-//		}
-//		uint32 enqSize = session->sendRingBuffer.Enqueue(sendData.GetDequeueBufferPtr(), sendData.GetUseSize());
-//		if (enqSize < sendData.GetUseSize()) {
-//			// 송신 링-버퍼에 송신 데이터를 복사할 수 있음을 확인했음에도 불구하고,
-//			// Enqueue 사이즈가 송신 데이터의 크기보다 작은 상황 발생
-//			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터 전체 Enqueue 실패" << endl;
-//			DebugBreak();
-//		}
-//#elif defined(SEND_RECV_RING_BUFF_SERIALIZATION_MODE)
-//		if (session->sendRingBuffer.GetFreeSize() < sizeof(UINT_PTR)) {
-//			// 송신 링-버퍼에 송신 데이터를 Enqueue(복사)할 여유 분이 없음(송신 버퍼 초과)
-//			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터를 Enqueue할 여유 사이즈 없음" << endl;
-//			DebugBreak();
-//		}
-//		UINT_PTR sendDataPtr = (UINT_PTR)&sendDataRef;
-//		uint32 enqSize = session->sendRingBuffer.Enqueue((BYTE*)(&sendDataPtr), sizeof(UINT_PTR));
-//		if (enqSize < sizeof(UINT_PTR)) {
-//			// 송신 링-버퍼에 송신 데이터를 복사할 수 있음을 확인했음에도 불구하고,
-//			// Enqueue 사이즈가 송신 데이터의 크기보다 작은 상황 발생
-//			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터 전체 Enqueue 실패" << endl;
-//			DebugBreak();
-//		}
-//#endif
-//#if defined(SESSION_SENDBUFF_SYNC_TEST)
-//		//session->sendBuffMtx.unlock();
-//		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
-//#endif
-//
-//		SendPost(sessionID);
-//	}
-//	else {
-//		return false;
-//	}
-//
-//	ReturnSession(session);
-//	return true;
-//}
-
 bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 #if defined(MT_FILE_LOG)
 	USHORT logIdx = mtFileLogger.AllocLogIndex();
@@ -235,7 +179,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		//session->sendBuffMtx.lock();
+		// 송신 버퍼에 송신 직렬화 패킷 포인터 인큐잉 -> AcquireSRWLockExclusive
 		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
@@ -277,7 +221,6 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 		}
 #endif
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-		//session->sendBuffMtx.unlock();
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
@@ -396,6 +339,7 @@ void CLanServer::SendPost(uint64 sessionID)
 
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
+		// 송신 버퍼에 존재하는 송신 직렬화 버퍼 포인터들을 읽어 wsabuf에 송신 데이터를 복사 -> AcquireSRWLockShared
 		AcquireSRWLockShared(&session->sendBuffSRWLock);
 #endif
 		DWORD numOfMessages = session->sendRingBuffer.GetUseSize() / sizeof(UINT_PTR);
@@ -795,7 +739,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-					//session->sendBuffMtx.lock();
+					// 송신 버퍼로부터 송신 직렬화 패킷 포인터 디큐잉 -> AcquireSRWLockExclusive
 					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
@@ -837,7 +781,6 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
-					//session->sendBuffMtx.unlock();
 					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
