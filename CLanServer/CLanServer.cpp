@@ -326,22 +326,28 @@ CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 
 void CLanServer::ReturnSession(stCLanSession* session)
 {
-//	InterlockedDecrement((uint32*)&session->sessionRef);
-//	assert(session->sessionRef.ioCnt >= 0);
-//	if (session->sessionRef.ioCnt == 0) {					// 찾고자 하던 세션이 아닌 다른 세션이 ioCnt가 0이 된다면?!
-//#if defined(SESSION_RELEASE_LOG)
-//		DeleteSession(session->uiId, "ReturnSession");
-//#else
-//		DeleteSession(session->uiId);
-//#endif
-//	}
+	//assert(session->sessionRef.ioCnt >= 1);
+	//if (session->sessionRef.ioCnt == 1) {
+	//	Disconnect(session->uiId, "ReturnSession Disconnect");
+	//}
+	//else {
+	//	InterlockedDecrement((uint32*)&session->sessionRef);
+	//}
+	// => 문제 식별
+	// ex) 비동기 수신이 걸려있는 상황에서 AcquireSession을 통해 ioCnt == 2인 상황,
+	// (1) 업데이트 스레드, ioCnt == 2인 상황에서 if (session->sessionRef.ioCnt == 1) 조건 통과
+	// (2) 작업자 스레드, GQCS 실패 또는 추가적인 WSARecv 실패 -> ioCnt 감소 -> ioCnt == 1 이기에 세션 삭제를 시도하지 못함(DeleteSession 호출 x)
+	// (3) 업데이트 스레드, else 문에서 ioCnt를 감소시킴 -> ioCnt == 0
+	// =>  ioCnt == 0, release == 0인 상황에서 세션이 삭제되지 않고 남아있는 상황 발생됨.
 
 	assert(session->sessionRef.ioCnt >= 1);
-	if (session->sessionRef.ioCnt == 1) {
+	int32 ioCnt = InterlockedDecrement((uint32*)&session->sessionRef);
+	if (ioCnt == 0) {
+		InterlockedIncrement((uint32*)&session->sessionRef);
 		Disconnect(session->uiId, "ReturnSession Disconnect");
 	}
-	else {
-		InterlockedDecrement((uint32*)&session->sessionRef);
+	else if (ioCnt < 0) {
+		DebugBreak();
 	}
 }
 
@@ -843,6 +849,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 		else {
 			// 1. IOCP 객체 자체의 문제
 			// 2. GQCS 호출 시 INIFINTE 외 대기 시간을 걸어 놓은 경우, 대기 시간 내 I/O가 완료되지 않은 경우
+			DebugBreak();
 			break;
 		}
 	}
