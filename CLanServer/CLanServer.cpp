@@ -878,7 +878,6 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 		else {
 			// 1. IOCP 객체 자체의 문제
 			// 2. GQCS 호출 시 INIFINTE 외 대기 시간을 걸어 놓은 경우, 대기 시간 내 I/O가 완료되지 않은 경우
-			DebugBreak();
 			break;
 		}
 	}
