@@ -23,6 +23,11 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	m_ReleaseLogIndex = -1;
 #endif
 
+#if defined(SENDBUFF_MONT_LOG)
+	m_SendBuffOfMaxSize = 0;
+	m_SessionOfMaxSendBuff = 0;
+#endif
+
 	//////////////////////////////////////////////////
 	// 네트워크 초기화
 	//////////////////////////////////////////////////
@@ -203,6 +208,13 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 			DebugBreak();
 		}
 		uint32 enqSize = session->sendRingBuffer.Enqueue((BYTE*)&sendDataPtr, sizeof(UINT_PTR));
+#if defined(SENDBUFF_MONT_LOG)
+		uint32 sendBuffSize = session->sendRingBuffer.GetUseSize();
+		if (m_SessionOfMaxSendBuff == sessionID || m_SendBuffOfMaxSize < sendBuffSize) {
+			m_SendBuffOfMaxSize = sendBuffSize;
+			m_SessionOfMaxSendBuff = sessionID;
+		}
+#endif
 #if defined(MT_FILE_LOG)
 		{
 			mtFileLogger.GetLogStruct(logIdx).ptr0 = 4;				// SendPacekt
@@ -950,15 +962,21 @@ void CLanServer::ConsoleLog()
 {
 	static size_t logCnt = 0;
 
+	static COORD coord;
+	coord.X = 0;
+	coord.Y = 0;
+	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+
+#if defined(SENDBUFF_MONT_LOG)
+	std::cout << "[최대 송신 버퍼 사용 크기]: " << m_SendBuffOfMaxSize << "                                                " << std::endl;
+	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
+#endif
+
 	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
 	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
 	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
 	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
 	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
-	static COORD coord;
-	coord.X = 0;
-	coord.Y = 0;
-	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
 	
 	std::cout << "[m_SessionAllocIdQueue size] "  << m_SessionAllocIdQueue.size() << "                            " << std::endl;
 	std::cout << "[m_CreatedSession size] " << m_CreatedSession.size() << "                            " << std::endl;

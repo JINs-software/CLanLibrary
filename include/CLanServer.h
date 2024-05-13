@@ -15,11 +15,6 @@
 
 #include "TlsMemPool.h"
 
-#define SESSION_SENDBUFF_SYNC_TEST
-#if defined(SESSION_SENDBUFF_SYNC_TEST)
-#include <mutex>
-#endif
-
 #include <assert.h>
 
 class CLanServer
@@ -67,12 +62,6 @@ class CLanServer
 			InitializeSRWLock(&sendBuffSRWLock);
 #endif
 		}
-
-		// 내부 버퍼 외부 주입 방식
-		//stCLanSession(BYTE* recvBuff, BYTE* sendBuff)
-		//	: recvRingBuffer(SESSION_RECV_BUFFER_SIZE, recvBuff), sendRingBuffer(SESSION_SEND_BUFFER_SIZE, sendBuff)
-		//{}
-
 		void Init(SOCKET _sock, stSessionID _Id) {
 			sock = _sock;
 			Id = _Id;
@@ -104,31 +93,14 @@ class CLanServer
 		}
 	};
 
-	// IOCP 모델을 사용하고, 내부에 작업자 스레드들을 사용
 private:
-#if defined(SESSION_RELEASE_LOG)
-	struct stSessionRelaseLog {
-		bool createFlag = false;
-		bool releaseSuccess;
-		bool disconnect = false;
-		uint64 sessionID = 0;
-		uint64 sessionIndex;
-		uint64 sessionIncrement;
-		int32 iocnt;
-		int32 releaseFlag;
-		string log = "";
-	};
-	std::vector<stSessionRelaseLog> m_ReleaseLog;
-	USHORT m_ReleaseLogIndex;
-	std::set<uint64> m_CreatedSession;
-	std::mutex m_CreatedSessionMtx;
-#endif
 
 	/////////////////////////////////
 	// Networking
 	/////////////////////////////////
 	SOCKET m_ListenSock;			// Listen Sock
 	SOCKADDR_IN m_ListenSockAddr;
+
 	/////////////////////////////////
 	// Session
 	/////////////////////////////////
@@ -161,10 +133,41 @@ private:
 	/////////////////////////////////
 	bool m_StopFlag;
 
+
+	/////////////////////////////////
+	// Memory Pool
+	/////////////////////////////////
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 protected:
 	TlsMemPoolManager<JBuffer> m_SerialBuffPoolMgr;
 	DWORD m_SerialBuffPoolIdx;
+#endif
+
+	/////////////////////////////////
+	// Log
+	/////////////////////////////////
+#if defined(SESSION_RELEASE_LOG)
+	struct stSessionRelaseLog {
+		bool createFlag = false;
+		bool releaseSuccess;
+		bool disconnect = false;
+		uint64 sessionID = 0;
+		uint64 sessionIndex;
+		uint64 sessionIncrement;
+		int32 iocnt;
+		int32 releaseFlag;
+		string log = "";
+	};
+	std::vector<stSessionRelaseLog> m_ReleaseLog;
+	USHORT m_ReleaseLogIndex;
+	std::set<uint64> m_CreatedSession;
+	std::mutex m_CreatedSessionMtx;
+#endif
+
+#if defined(SENDBUFF_MONT_LOG)
+	// 최대 송신 버퍼
+	size_t m_SendBuffOfMaxSize;
+	UINT64 m_SessionOfMaxSendBuff;
 #endif
 
 #if defined(MT_FILE_LOG)
@@ -225,10 +228,10 @@ public:
 	virtual void OnWorkerThreadStart() {};									// TLS 관련 초기화 작업 가능
 
 	virtual bool OnConnectionRequest(/*IP, Port*/);
-	virtual void OnClientJoin(uint64 sessionID) = 0;
-	virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer);
-	virtual void OnClientLeave(uint64 sessionID) = 0;
-	virtual void OnRecv(uint64 sessionID, JBuffer& recvBuff) = 0;
+	virtual void OnClientJoin(UINT64 sessionID) = 0;
+	virtual void OnDeleteSendPacket(UINT64 sessionID, JBuffer& sendRingBuffer);
+	virtual void OnClientLeave(UINT64 sessionID) = 0;
+	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) = 0;
 	//virtual void OnSend() = 0;
 	//virtual void OnWorkerThreadBegin() = 0;
 	//virtual void OnWorkerThreadEnd() = 0;
