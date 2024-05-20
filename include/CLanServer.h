@@ -6,12 +6,7 @@
 #define JBUFF_DIRPTR_MANUAL_RESET
 #include "JBuffer.h"
 
-//#define MT_FILE_LOG
-#if defined(MT_FILE_LOG)
-#include "MTFileLogger.h"
-#endif
-
-#define SESSION_RELEASE_LOG
+#define SESSION_LOG
 
 #include "TlsMemPool.h"
 
@@ -42,47 +37,54 @@ class CLanServer
 		SRWLOCK sendBuffSRWLock;
 		// => 추후 송신 버퍼를 락-프리 큐로 변경, 송신 버퍼를 위한 동기화 객체 생략
 #endif
-		stCLanSession() 
-			: recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
+		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
 		{
 			Id.idx = 0;
+			Id.incremental = 0;
+			uiId = 0;
 			sessionRef.ioCnt = 0;
 			sessionRef.releaseFlag = 0;
 		}
-		stCLanSession(SOCKET _sock, stSessionID _Id)
-			: sock(_sock), Id(_Id), recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE), sendFlag(0)//, ioCnt(0)
-		{
-			sessionRef.ioCnt = 0;
-			sessionRef.releaseFlag = 0;
-			memcpy(&uiId, &Id, sizeof(Id));
-			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
-			memset(&sendOverlapped, 0, sizeof(WSAOVERLAPPED));
 
-#if defined(SESSION_SENDBUFF_SYNC_TEST)
-			InitializeSRWLock(&sendBuffSRWLock);
-#endif
-		}
 		void Init(SOCKET _sock, stSessionID _Id) {
-			sock = _sock;
 			Id = _Id;
+			memcpy(&uiId, &Id, sizeof(Id));			
 
-			memcpy(&uiId, &Id, sizeof(Id));
+			InterlockedIncrement((uint32*)&sessionRef);		// AcquireSession에서 session IOCnt를 1 감소 시키는 것과 연관
+			sessionRef.releaseFlag = 0;						// IOCnt를 증가시키고, releaseFlag를 0으로 초기화하는 순서가 중요하다.
+
+			sock = _sock;
 			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
 			memset(&sendOverlapped, 0, sizeof(WSAOVERLAPPED));
-
+			if (recvRingBuffer.GetUseSize() > 0) {
+				DebugBreak();
+			}
 			recvRingBuffer.ClearBuffer();
+			if (sendRingBuffer.GetUseSize() > 0) {
+				DebugBreak();
+			}
 			sendRingBuffer.ClearBuffer();
-
-			//ioCnt = 0;
-			//sessionRef.ioCnt = 0;
-			InterlockedIncrement((uint32*)&sessionRef);		// AcquireSession에서 session IOCnt를 1 감소 시키는 것과 연관
-
-			sessionRef.releaseFlag = 0;						// IOCnt를 증가시키고, releaseFlag를 0으로 초기화하는 순서가 중요하다.
 			sendFlag = false;
-
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 			InitializeSRWLock(&sendBuffSRWLock);
 #endif
+
+		}
+		
+		bool TryRelease() {
+			bool ret = false;
+
+			stSessionRef exgRef;
+			exgRef.ioCnt = 0;
+			exgRef.releaseFlag = 1;
+			uint32 exg = *((uint32*)&exgRef);
+
+			uint32 org = InterlockedCompareExchange((uint32*)&sessionRef, exg, 0);
+			if (org == 0) {
+				ret = true;
+			}
+			
+			return ret;
 		}
 
 		void clearRecvOverlapped() {
@@ -146,22 +148,55 @@ protected:
 	/////////////////////////////////
 	// Log
 	/////////////////////////////////
-#if defined(SESSION_RELEASE_LOG)
-	struct stSessionRelaseLog {
-		bool createFlag = false;
-		bool releaseSuccess;
-		bool disconnect = false;
+#if defined(SESSION_LOG)
+	enum enSessionWorkType {
+		SESSION_CREATE = 1,
+		SESSION_RELEASE,
+		SESSION_DISCONNECT,
+		SESSION_ACCEPT_WSARECV,
+		SESSION_RETURN_GQCS_Disconn,
+		SESSION_RETURN_GQCS,
+		SESSION_COMPLETE_RECV,
+		SESSION_COMPLETE_SEND,
+		SESSION_WSARECV,
+		SESSION_WSASEND,
+		SESSION_ACQUIRE,
+		SESSION_RETURN,
+		SESSION_AFTER_SENDPOST
+	};
+	struct stSessionLog {
+		enSessionWorkType sessionWork;
+		bool workDone;
+		bool ioPending;
+
 		uint64 sessionID = 0;
 		uint64 sessionIndex;
-		uint64 sessionIncrement;
+
 		int32 iocnt;
 		int32 releaseFlag;
+
 		string log = "";
+
+		void Init() {
+			memset(this, 0, sizeof(stSessionLog) - sizeof(string));
+			log = "";
+		}
 	};
-	std::vector<stSessionRelaseLog> m_ReleaseLog;
-	USHORT m_ReleaseLogIndex;
+	std::vector<stSessionLog> m_SessionLog;
+	USHORT m_SessionLogIndex;
 	std::set<uint64> m_CreatedSession;
 	std::mutex m_CreatedSessionMtx;
+
+	stSessionLog& GetSessionLog() {
+		USHORT releaseLogIdx = InterlockedIncrement16((short*)&m_SessionLogIndex);
+		m_SessionLog[releaseLogIdx].Init();
+		return m_SessionLog[releaseLogIdx];
+	}
+
+	// 총 Accept 횟수
+	INT64 m_TotalAcceptCnt = 0;
+	INT64 m_TotalDeleteCnt = 0;
+	INT64 m_TotalLoginCnt = 0;
 #endif
 
 #if defined(SENDBUFF_MONT_LOG)
@@ -169,17 +204,6 @@ protected:
 	size_t m_SendBuffOfMaxSize;
 	UINT64 m_SessionOfMaxSendBuff;
 #endif
-
-#if defined(MT_FILE_LOG)
-	/////////////////////////////////
-	// MTFileLogger
-	/////////////////////////////////
-protected:
-	MTFileLogger mtFileLogger;
-public:
-	void PrintMTFileLog();
-#endif
-
 
 public:
 	CLanServer(const char* serverIP, uint16 serverPort,
@@ -195,14 +219,14 @@ public:
 	inline int GetSessionCount() {
 		return m_MaxOfSessions - m_SessionAllocIdQueue.size();
 	}
-#if defined(SESSION_RELEASE_LOG)
+
+#if defined(SESSION_LOG)
 	void Disconnect(uint64 sessionID, string log = "");
 #else
 	void Disconnect(uint64 sessionID);
 #endif
-	//bool SendPacket(uint64 sessionID, JBuffer& sendDataRef);
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
-
+	
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);
 	void ReturnSession(stCLanSession* session);
@@ -210,7 +234,7 @@ private:
 	void SendPost(uint64 sessionID);
 
 	stCLanSession* CreateNewSession(SOCKET sock);
-#if defined(SESSION_RELEASE_LOG)
+#if defined(SESSION_LOG)
 	bool DeleteSession(uint64 sessionID, string log = "");
 #else
 	bool DeleteSession(uint64 sessionID);
@@ -248,9 +272,10 @@ public:
 	int getRecvMessageTPS();
 	int getSendMessageTPS();
 
+	virtual void ServerConsoleLog() {}
 	void ConsoleLog();
 	void MemAllocLog();
-#if defined(SESSION_RELEASE_LOG)
+#if defined(SESSION_LOG)
 	void SessionReleaseLog();
 #endif
 };
