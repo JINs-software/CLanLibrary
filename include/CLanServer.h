@@ -50,8 +50,16 @@ class CLanServer
 			Id = _Id;
 			memcpy(&uiId, &Id, sizeof(Id));			
 
-			InterlockedIncrement((uint32*)&sessionRef);		// AcquireSession에서 session IOCnt를 1 감소 시키는 것과 연관
-			sessionRef.releaseFlag = 0;						// IOCnt를 증가시키고, releaseFlag를 0으로 초기화하는 순서가 중요하다.
+			// IOCnt를 증가시키고, releaseFlag를 0으로 초기화하는 순서가 중요하다.
+			// (IOCnt를 0으로 1로 초기화하는 방식이 아닌 증가시키는 방식으로)
+			InterlockedIncrement((uint32*)&sessionRef);
+
+			//sessionRef.releaseFlag = 0;						
+			stSessionRef releaseFlagOffRef;
+			releaseFlagOffRef.ioCnt = -1;
+			releaseFlagOffRef.releaseFlag = 0;
+			uint32 releaseFlagOff = *(uint32*)&releaseFlagOffRef;
+			InterlockedAnd((long*)&sessionRef, releaseFlagOff);
 
 			sock = _sock;
 			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
