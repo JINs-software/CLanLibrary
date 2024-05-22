@@ -251,13 +251,35 @@ private:
 	static UINT __stdcall AcceptThreadFunc(void* arg);
 	static UINT __stdcall WorkerThreadFunc(void* arg);
 		
-public:
-	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };		// IOCP 작업자 스레드의 생성 갯수가 Start 함수에서만 이루어지는 것인지,
-																			// 런타임 중 추가적으로 생성되고, 소멸될 수 있는지는 Start 함수 flag에서 선택하도록...
-																			// (컨텐츠 쪽에 결정권을 줌)
+protected:
+	/////////////////////////////////////////////////////////////////
+	// OnWorkerThreadCreate
+	/////////////////////////////////////////////////////////////////
+	// 호출 시점: CLanServer::Start에서 스레드를 생성(CREATE_SUSPENDED) 후
+	// 반환: True 반환 시 생성된 스레드의 수행 시작
+	//		 False 반환 시 생성된 생성된 스레드 종료	
+	// Desc: 생성자에 전달한 IOCP 작업자 스레드 생성 갯수와 별개로 해당 함수의 구현부에서 IOCP 작업자 스레드 갯수 제어
+	//		또한 작업자 스레드의 수행 전 필요한 초기화 작업 수행(시점 상 OnWorkerThreadStart 호출 전)
+	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };		
+
+	/////////////////////////////////////////////////////////////////
+	// OnWorkerThreadCreateDone
+	/////////////////////////////////////////////////////////////////
+	// 호출 시점: CLanServer::Start에서 모든 IOCP 작업자 스레드 생성을 마친 후
 	virtual void OnWorkerThreadCreateDone() {};
 		
-	virtual void OnWorkerThreadStart() {};									// TLS 관련 초기화 작업 가능
+	/////////////////////////////////////////////////////////////////
+	// OnWorkerThreadStart
+	/////////////////////////////////////////////////////////////////
+	// 호출 시점: 개별 IOCP 작업자 스레드가 수행하는 WorkerThreadFunc의 함수 초입부(GQCS가 포함된 작업 반복문 이전)
+	// Desc: 개별 스레드가 초기에 설정하는 작업 수행(ex, Thread Local Storage 관련 초기화)
+	virtual void OnWorkerThreadStart() {};									
+	/////////////////////////////////////////////////////////////////
+	// OnWorkerThreadEnd
+	/////////////////////////////////////////////////////////////////
+	// 호출 시점: 개별 IOCP 작업자 스레드가 종료(작업자 함수 return) 전
+	// Desc: 스레드 별 필요한 정리 작업 수행
+	virtual void OnWorkerThreadEnd() {};
 
 	virtual bool OnConnectionRequest(/*IP, Port*/);
 	virtual void OnClientJoin(UINT64 sessionID) = 0;
@@ -280,6 +302,7 @@ public:
 	int getRecvMessageTPS();
 	int getSendMessageTPS();
 
+public:
 	virtual void ServerConsoleLog() {}
 	void ConsoleLog();
 	void MemAllocLog();

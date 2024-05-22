@@ -98,17 +98,22 @@ bool CLanServer::Start()
 	m_AcceptThread = (HANDLE)_beginthreadex(NULL, 0, CLanServer::AcceptThreadFunc, this, 0, NULL);
 	cout << "[Start Thread] Accept Thread" << endl;
 	for (uint16 idx = 0; idx < m_NumOfWorkerThreads; idx++) {
-		m_WorkerThreads[idx] = (HANDLE)_beginthreadex(NULL, 0, CLanServer::WorkerThreadFunc, this, CREATE_SUSPENDED, NULL);
+		uintptr_t ret = _beginthreadex(NULL, 0, CLanServer::WorkerThreadFunc, this, CREATE_SUSPENDED, NULL);
+		m_WorkerThreads[idx] = (HANDLE)ret;
+		if (m_WorkerThreads[idx] == INVALID_HANDLE_VALUE) {
+			DebugBreak();
+		}
 		DWORD thID = GetThreadId(m_WorkerThreads[idx]);
 		m_WorkerThreadStartFlag.insert({thID, true});
 		if (!OnWorkerThreadCreate(m_WorkerThreads[idx])) {
 			m_WorkerThreadStartFlag[thID] = false;
 			cout << "[Cant't Start Thread] Worker Thread (thID: " << GetThreadId(m_WorkerThreads[idx]) << ")" << endl;
+			_endthreadex(ret);
 		}
 		else {
 			cout << "[Start Thread] Worker Thread (thID: " << GetThreadId(m_WorkerThreads[idx]) << ")" << endl;
+			ResumeThread(m_WorkerThreads[idx]);
 		}
-		ResumeThread(m_WorkerThreads[idx]);
 	}
 
 	OnWorkerThreadCreateDone();
@@ -907,6 +912,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 			break;
 		}
 	}
+
+	clanserver->OnWorkerThreadEnd();
 
 	return 0;
 }
