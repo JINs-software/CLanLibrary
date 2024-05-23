@@ -291,6 +291,12 @@ protected:
 	//virtual void OnWorkerThreadEnd() = 0;
 	virtual void OnError() = 0;
 
+	/////////////////////////////////////////////////////////////////
+	// Encode, Decode
+	/////////////////////////////////////////////////////////////////
+	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
+	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
+
 	
 	/////////////////////////////////
 	// 모니터링 항목

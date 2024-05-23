@@ -954,6 +954,54 @@ void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 #endif
 }
 
+void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads) {
+	BYTE payloadSum = 0;
+	for (USHORT i = 0; i < payloadLen; i++) {
+		payloadSum += payloads[i];
+		payloadSum %= 256;
+	}
+	BYTE Pb = payloadSum ^ (randKey + 1);
+	BYTE Eb = Pb ^ (dfPACKET_KEY + 1);
+	checkSum = Eb;
+
+	for (USHORT i = 1; i <= payloadLen; i++) {
+		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
+		BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+
+		payloads[i - 1] = En;
+
+		Pb = Pn;
+		Eb = En;
+	}
+}
+bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads) {
+	BYTE Pb = checkSum ^ (dfPACKET_KEY + 1);
+	BYTE payloadSum = Pb ^ (randKey + 1);
+	BYTE Eb = checkSum;
+
+	for (USHORT i = 1; i <= payloadLen; i++) {
+		BYTE Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		BYTE Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+
+		Pb = Pn;
+		Eb = payloads[i - 1];
+		payloads[i - 1] = Dn;
+	}
+
+	// checksum °ËÁõ
+	BYTE payloadSumCmp = 0;
+	for (USHORT i = 0; i < payloadLen; i++) {
+		payloadSumCmp += payloads[i];
+		payloadSumCmp %= 256;
+	}
+	if (payloadSum != payloadSumCmp) {
+		DebugBreak();
+		return false;
+	}
+
+	return true;
+}
+
 
 #if defined(MT_FILE_LOG)
 void CLanServer::PrintMTFileLog() {
