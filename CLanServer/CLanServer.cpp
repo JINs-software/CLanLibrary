@@ -619,6 +619,11 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 #if defined(SESSION_LOG)
 					clanserver->m_TotalAcceptCnt++;
 #endif
+
+#if defined(TRACKING_CLIENT_PORT)
+					newSession->clientPort = clientAddr.sin_port;
+#endif
+
 					// 세션 생성 이벤트
 					clanserver->OnClientJoin(newSession->uiId);
 
@@ -881,7 +886,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 						// 세션 연결 유지 -> 추가적인 송신 데이터 존재 시 SendPost 호출
 						bool sendAgainFlag = false;
 						AcquireSRWLockExclusive(&session->sendBuffSRWLock);
-						if (session->sendRingBuffer.GetUseSize() == 0) {
+						//if (session->sendRingBuffer.GetUseSize() == 0) {
+						if (session->sendRingBuffer.GetUseSize() >= sizeof(UINT_PTR)) {
 							sendAgainFlag = true;
 						}
 						ReleaseSRWLockExclusive(&session->sendBuffSRWLock);

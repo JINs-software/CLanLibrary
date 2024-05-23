@@ -37,6 +37,11 @@ class CLanServer
 		SRWLOCK sendBuffSRWLock;
 		// => 추후 송신 버퍼를 락-프리 큐로 변경, 송신 버퍼를 위한 동기화 객체 생략
 #endif
+
+#if defined(TRACKING_CLIENT_PORT)
+		USHORT	clientPort;
+#endif
+
 		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
 		{
 			Id.idx = 0;
