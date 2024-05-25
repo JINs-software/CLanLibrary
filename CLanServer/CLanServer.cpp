@@ -941,7 +941,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 							sendAgainFlag = true;
 						}
 #else
-						if (!session->sendBufferVector.size() > 0) {
+						if (session->sendBufferVector.size() > 0) {
 							sendAgainFlag = true;
 						}
 #endif
