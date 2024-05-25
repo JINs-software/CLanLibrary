@@ -8,7 +8,9 @@
 
 #define SESSION_LOG
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 #include "TlsMemPool.h"
+#endif
 
 #include <assert.h>
 
@@ -29,8 +31,13 @@ class CLanServer
 		WSAOVERLAPPED recvOverlapped;
 		WSAOVERLAPPED sendOverlapped;
 		JBuffer recvRingBuffer;
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 		JBuffer sendRingBuffer;
-		//uint32 ioCnt;
+#else
+		//std::queue<std::shared_ptr<JBuffer>> sendQueueBuffer;
+		std::vector<std::shared_ptr<JBuffer>> sendBufferVector;
+#endif
+		
 		stSessionRef sessionRef;
 		uint32 sendFlag;
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
@@ -42,7 +49,11 @@ class CLanServer
 		USHORT	clientPort;
 #endif
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
+#else
+		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE)
+#endif
 		{
 			Id.idx = 0;
 			Id.incremental = 0;
@@ -73,10 +84,16 @@ class CLanServer
 				DebugBreak();
 			}
 			recvRingBuffer.ClearBuffer();
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			if (sendRingBuffer.GetUseSize() > 0) {
 				DebugBreak();
 			}
 			sendRingBuffer.ClearBuffer();
+#else
+			if (sendBufferVector.size() > 0) {
+				DebugBreak();
+			}
+#endif
 			sendFlag = false;
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
 			InitializeSRWLock(&sendBuffSRWLock);
@@ -119,8 +136,8 @@ private:
 	/////////////////////////////////
 	// Session
 	/////////////////////////////////
-	uint16 m_MaxOfSessions;
-	queue<uint16> m_SessionAllocIdQueue;
+	UINT16 m_MaxOfSessions;
+	queue<UINT16> m_SessionAllocIdQueue;
 	CRITICAL_SECTION m_SessionAllocIdQueueCS;
 
 	uint64 m_Incremental;
@@ -139,7 +156,7 @@ private:
 	/////////////////////////////////
 	//HANDLE m_ExitEvent;
 	HANDLE m_AcceptThread;
-	uint16 m_NumOfWorkerThreads;
+	UINT16 m_NumOfWorkerThreads;
 	vector<HANDLE> m_WorkerThreads;
 	map<DWORD, bool> m_WorkerThreadStartFlag;
 
@@ -149,10 +166,10 @@ private:
 	bool m_StopFlag;
 
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	/////////////////////////////////
 	// Memory Pool
 	/////////////////////////////////
-#if defined(ALLOC_BY_TLS_MEM_POOL)
 protected:
 	TlsMemPoolManager<JBuffer> m_SerialBuffPoolMgr;
 	DWORD m_SerialBuffPoolIdx;
@@ -162,6 +179,7 @@ protected:
 	// Log
 	/////////////////////////////////
 #if defined(SESSION_LOG)
+protected:
 	enum enSessionWorkType {
 		SESSION_CREATE = 1,
 		SESSION_RELEASE,
@@ -219,6 +237,7 @@ protected:
 #endif
 
 public:
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	CLanServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections, 
 		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
@@ -226,6 +245,14 @@ public:
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 		bool beNagle = true
 	);
+#else
+	CLanServer(const char* serverIP, UINT16 serverPort,
+		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
+		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
+		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+		bool beNagle = true
+	);
+#endif
 	~CLanServer();
 	bool Start();
 	void Stop();
@@ -238,7 +265,12 @@ public:
 #else
 	void Disconnect(uint64 sessionID);
 #endif
+
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
+#else
+	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr);
+#endif
 	
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);
@@ -288,7 +320,11 @@ protected:
 
 	virtual bool OnConnectionRequest(/*IP, Port*/);
 	virtual void OnClientJoin(UINT64 sessionID) = 0;
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	virtual void OnDeleteSendPacket(UINT64 sessionID, JBuffer& sendRingBuffer);
+#else
+	virtual void OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_ptr<JBuffer>>& sendBufferVec);
+#endif
 	virtual void OnClientLeave(UINT64 sessionID) = 0;
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) = 0;
 	//virtual void OnSend() = 0;
@@ -316,7 +352,9 @@ protected:
 public:
 	virtual void ServerConsoleLog() {}
 	void ConsoleLog();
+#if defined(ALLOC_MEM_LOG)
 	void MemAllocLog();
+#endif
 #if defined(SESSION_LOG)
 	void SessionReleaseLog();
 #endif

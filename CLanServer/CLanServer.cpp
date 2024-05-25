@@ -5,18 +5,24 @@
 
 #include <cstdlib> // system 함수를 사용하기 위해 필요
 
-CLanServer::CLanServer(const char* serverIP, uint16 serverPort, 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 	bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
 	size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultCapacity,
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 	bool beNagle
 )
-#if defined(ALLOC_BY_TLS_MEM_POOL)
-	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), 
-	m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false), 
+	: m_MaxOfSessions(maxOfConnections), m_Incremental(0),
+	m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false),
 	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag)
 #else
+CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
+	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+	bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
+	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
+	bool beNagle
+)
 	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false)
 #endif
 {
@@ -183,12 +189,14 @@ void CLanServer::Disconnect(uint64 sessionID)
 }
 #endif
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
 
 		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
+
 		if (session->sendRingBuffer.GetFreeSize() < sizeof(UINT_PTR)) {
 			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터를 Enqueue할 여유 사이즈 없음" << endl;
 			DebugBreak();
@@ -208,6 +216,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터 전체 Enqueue 실패" << endl;
 			DebugBreak();
 		}
+
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 
 		SendPost(sessionID);
@@ -220,6 +229,29 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 
 	return true;
 }
+#else
+bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr)
+{
+	stCLanSession* session = AcquireSession(sessionID);
+	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
+
+		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
+
+		session->sendBufferVector.push_back(sendDataPtr);
+
+		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+
+		SendPost(sessionID);
+	}
+	else {
+		return false;
+	}
+
+	ReturnSession(session);
+
+	return true;
+}
+#endif
 
 CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 {
@@ -380,7 +412,11 @@ void CLanServer::SendPost(uint64 sessionID)
 
 
 		AcquireSRWLockShared(&session->sendBuffSRWLock);
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 		DWORD numOfMessages = session->sendRingBuffer.GetUseSize() / sizeof(UINT_PTR);
+#else
+		DWORD numOfMessages = session->sendBufferVector.size();
+#endif
 		ReleaseSRWLockShared(&session->sendBuffSRWLock);
 
 		WSABUF wsabuffs[WSABUF_ARRAY_DEFAULT_SIZE];
@@ -390,14 +426,20 @@ void CLanServer::SendPost(uint64 sessionID)
 
 			int sendLimit = min(numOfMessages, WSABUF_ARRAY_DEFAULT_SIZE);
 			for (int idx = 0; idx < sendLimit; idx++) {
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 				JBuffer* msgPtr;
-				//session->sendRingBuffer.Dequeue((BYTE*)&msgPtr, sizeof(UINT_PTR));
 				session->sendRingBuffer.Peek(sizeof(UINT_PTR) * idx, (BYTE*)&msgPtr, sizeof(UINT_PTR));
 				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
 				wsabuffs[idx].len = msgPtr->GetUseSize();
 				if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
 					DebugBreak();
 				}
+#else
+				shared_ptr<JBuffer> msgPtr = session->sendBufferVector[idx];
+				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
+				wsabuffs[idx].len = msgPtr->GetUseSize();
+#endif
+				
 			}
 			session->sendOverlapped.Offset = sendLimit;		// Offset 멤버를 활용해보면 어떨까?
 															// 송신한 메시지 갯수를 담도록 한다.
@@ -542,7 +584,11 @@ bool CLanServer::DeleteSession(uint64 sessionID, string log) {
 		uint16 allocatedIdx = delSession->Id.idx;
 		closesocket(m_Sessions[allocatedIdx]->sock);
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 		OnDeleteSendPacket(sessionID, delSession->sendRingBuffer);
+#else
+		OnDeleteSendPacket(sessionID, delSession->sendBufferVector);
+#endif
 
 #if defined(SESSION_LOG)
 		InterlockedIncrement64(&m_TotalDeleteCnt);
@@ -862,9 +908,13 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
 					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 						JBuffer* sendBuff;
 						session->sendRingBuffer >> sendBuff;
 						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+#else 
+						session->sendBufferVector.erase(session->sendBufferVector.begin());
+#endif
 					}
 					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 
@@ -885,12 +935,17 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					else {
 						// 세션 연결 유지 -> 추가적인 송신 데이터 존재 시 SendPost 호출
 						bool sendAgainFlag = false;
-						AcquireSRWLockExclusive(&session->sendBuffSRWLock);
-						//if (session->sendRingBuffer.GetUseSize() == 0) {
+						AcquireSRWLockShared(&session->sendBuffSRWLock);
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 						if (session->sendRingBuffer.GetUseSize() >= sizeof(UINT_PTR)) {
 							sendAgainFlag = true;
 						}
-						ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+#else
+						if (!session->sendBufferVector.size() > 0) {
+							sendAgainFlag = true;
+						}
+#endif
+						ReleaseSRWLockShared(&session->sendBuffSRWLock);
 
 						if (sendAgainFlag) {
 							clanserver->SendPost(session->uiId);
@@ -937,6 +992,8 @@ bool CLanServer::OnConnectionRequest(/*IP, Port*/) {
 	return ret;
 }
 
+
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 {
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
@@ -959,6 +1016,23 @@ void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 	ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 }
+#else
+void CLanServer::OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_ptr<JBuffer>>& sendBufferVec)
+{
+#if defined(SESSION_SENDBUFF_SYNC_TEST)
+	// 송신 버퍼로부터 송신 직렬화 패킷 포인터 디큐잉 -> AcquireSRWLockExclusive
+	stSessionID stID = *(stSessionID*)&sessionID;
+	stCLanSession* session = m_Sessions[stID.idx];
+	AcquireSRWLockExclusive(&session->sendBuffSRWLock);
+#endif
+
+	sendBufferVec.clear();
+
+#if defined(SESSION_SENDBUFF_SYNC_TEST)
+	ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+#endif
+}
+#endif
 
 void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads) {
 	BYTE payloadSum = 0;
@@ -1124,16 +1198,19 @@ void CLanServer::ConsoleLog()
 	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
 #endif
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
 	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
 	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
 	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
 	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
+#endif
 	
 	std::cout << "[m_SessionAllocIdQueue size] "  << m_SessionAllocIdQueue.size() << "                            " << std::endl;
 	std::cout << "[m_CreatedSession size] " << m_CreatedSession.size() << "                            " << std::endl;
 
 	std::cout << "[Log Count] " << logCnt++ << "                                                " << std::endl;
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	std::cout << "Total Alloc Mem Count : " << totalAllocMemCnt << "                            " << std::endl;
 	std::cout << "Total Free Mem Count  : " << totalFreeMemCnt << "                             " << std::endl;
 	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                        " << std::endl;
@@ -1149,11 +1226,14 @@ void CLanServer::ConsoleLog()
 		totalUnitCnt += iter->second.tlsMemPoolUnitCnt;
 		totalUnitCnt += iter->second.lfMemPoolFreeCnt;
 	}
+
 	std::cout << "------------------------------------------                                    " << std::endl;
 	std::cout << "Total Unit Cnt: " << totalUnitCnt << "                                        " <<std::endl;
 	std::cout << "==========================================                                    " << std::endl;
+#endif
 }
 
+#if defined(ALLOC_MEM_LOG)
 void CLanServer::MemAllocLog()
 {
 	time_t now = time(0);
@@ -1214,6 +1294,7 @@ void CLanServer::MemAllocLog()
 
 	std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
 }
+#endif
 
 void CLanServer::SessionReleaseLog() {
 	time_t now = time(0);

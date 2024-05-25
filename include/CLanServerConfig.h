@@ -32,7 +32,7 @@
 // 메모리 풀
 ////////////////////////////////////////////////////
 #define ALLOC_BY_TLS_MEM_POOL
-#if defined(ALLOC_BY_TLS_MEM_POOL)	
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 #define TLS_MEM_POOL_DEFAULT_UNIT_CNT		100
 #define TLS_MEM_POOL_DEFAULT_CAPACITY		100
 #define TLS_MEM_POOL_DEFAULT_SURPLUS_SIZE	100
