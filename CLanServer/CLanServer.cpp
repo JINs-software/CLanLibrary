@@ -1007,9 +1007,7 @@ void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 	while (sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
 		JBuffer* sendPacekt;
 		sendRingBuffer >> sendPacekt;
-#if defined(ALLOC_MEM_LOG)
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
-#endif
 	}
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
