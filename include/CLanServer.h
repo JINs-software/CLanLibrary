@@ -330,7 +330,7 @@ protected:
 	//virtual void OnSend() = 0;
 	//virtual void OnWorkerThreadBegin() = 0;
 	//virtual void OnWorkerThreadEnd() = 0;
-	virtual void OnError() = 0;
+	virtual void OnError() {};
 
 	/////////////////////////////////////////////////////////////////
 	// Encode, Decode
