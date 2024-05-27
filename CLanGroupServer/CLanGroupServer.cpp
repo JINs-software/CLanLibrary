@@ -1,8 +1,8 @@
 #include "CLanGroupServer.h"
 
-UINT __stdcall SessionGroupThread::SessionGroupThreadFunc(void* arg)
+UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 {
-	SessionGroupThread* groupthread = (SessionGroupThread*)arg;
+	CLanGroupThread* groupthread = (CLanGroupThread*)arg;
 
 	HANDLE events[2] = { groupthread->m_SessionGroupThreadStopEvent, groupthread->m_RecvEvent };
 	while (true) {
@@ -17,6 +17,7 @@ UINT __stdcall SessionGroupThread::SessionGroupThreadFunc(void* arg)
 				groupthread->m_RecvQueueMtx.lock();
 				if (!groupthread->m_RecvQueue.empty()) {
 					recvBuff = groupthread->m_RecvQueue.front();
+					groupthread->m_RecvQueue.pop();
 					isEmpty = false;
 				}
 				groupthread->m_RecvQueueMtx.unlock();
@@ -33,7 +34,32 @@ UINT __stdcall SessionGroupThread::SessionGroupThreadFunc(void* arg)
 	return 0;
 }
 
-void CLanGroupServer::CreateGroup(GroupID newGroupID, SessionGroupThread* groupThread)
+void CLanGroupThread::Disconnect(uint64 sessionID) {
+	m_ClanGroupServer->Disconnect(sessionID);
+}
+bool CLanGroupThread::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	return m_ClanGroupServer->SendPacket(sessionID, sendDataPtr);
+#else
+	shared_ptr<JBuffer> sptr = make_shared<JBuffer>(sendDataPtr);
+	return m_ClanGroupServer->SendPacket(sessionID, sptr);
+#endif
+}
+void CLanGroupThread::ForwardSessionGroup(SessionID sessionID, GroupID to) {
+	m_ClanGroupServer->ForwardSessionGroup(sessionID, m_GroupID, to);
+}
+void CLanGroupThread::PostMsgToThreadGroup(GroupID groupID, JBuffer& msg) {
+	m_ClanGroupServer->PostMsgToThreadGroup(groupID, msg);
+}
+
+void CLanGroupThread::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads) {
+	m_ClanGroupServer->Encode(randKey, payloadLen, checkSum, payloads);
+}
+bool CLanGroupThread::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads) {
+	return m_ClanGroupServer->Decode(randKey, payloadLen, checkSum, payloads);
+}
+
+void CLanGroupServer::CreateGroup(GroupID newGroupID, CLanGroupThread* groupThread)
 {
 	if (m_GroupThreads.find(newGroupID) != m_GroupThreads.end()) {
 		DebugBreak();
@@ -61,10 +87,20 @@ void CLanGroupServer::EnterSessionGroup(SessionID sessionID, GroupID enterGroup)
 	ReleaseSRWLockExclusive(&m_SessionGroupIDSrwLock);
 }
 
+void CLanGroupServer::LeaveSessionGroup(SessionID sessionID)
+{
+	AcquireSRWLockExclusive(&m_SessionGroupIDSrwLock);
+	if (m_SessionGroupID.find(sessionID) == m_SessionGroupID.end()) {
+		DebugBreak();
+	}
+	m_SessionGroupID.erase(sessionID);
+	ReleaseSRWLockExclusive(&m_SessionGroupIDSrwLock);
+}
+
 void CLanGroupServer::ForwardSessionGroup(SessionID sessionID, GroupID from, GroupID to)
 {
 	AcquireSRWLockExclusive(&m_SessionGroupIDSrwLock);
-	if (m_SessionGroupID.find(sessionID) != m_SessionGroupID.end()) {
+	if (m_SessionGroupID.find(sessionID) == m_SessionGroupID.end()) {
 		DebugBreak();
 	}
 	m_SessionGroupID[sessionID] = to;
@@ -97,13 +133,21 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 	// 이벤트 깨움 방식
 	// 1. 데이터 복사
 	std::shared_ptr<JBuffer> recvData = std::make_shared<JBuffer>();
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	UINT recvCnt = RecvData(recvBuff, *recvData);
+	InterlockedAdd(&m_CalcTpsItems[RECV_TPS], recvCnt);
+#else 
 	RecvData(recvBuff, *recvData);
+#endif
 
-	m_GroupRecvData[groupID].recvQueueMtx.lock();
+
+	stSessionRecvBuff sessionRecvBuff{ sessionID, recvData };
+	m_GroupThreads[groupID]->PushRecvBuff(sessionRecvBuff);
+	//m_GroupRecvData[groupID].recvQueueMtx.lock();
 	// 2. 큐 삽입
-	m_GroupRecvData[groupID].recvQueue.push({ sessionID, recvData });
-	// 3. 이벤트 On
-	SetEvent(m_GroupRecvData[groupID].recvEvent);
-	m_GroupRecvData[groupID].recvQueueMtx.unlock();
+	//m_GroupRecvData[groupID].recvQueue.push({ sessionID, recvData });
+	//// 3. 이벤트 On
+	//SetEvent(m_GroupRecvData[groupID].recvEvent);
+	//m_GroupRecvData[groupID].recvQueueMtx.unlock();
 }
 

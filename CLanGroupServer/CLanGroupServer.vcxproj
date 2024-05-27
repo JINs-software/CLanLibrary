@@ -79,10 +79,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IncludePath>$(SolutionDir)\include</IncludePath>
     <ExternalIncludePath>$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\0. ServerNetwork\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(SolutionDir)\include</IncludePath>
     <ExternalIncludePath>$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\0. ServerNetwork\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
