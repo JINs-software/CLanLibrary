@@ -1,5 +1,56 @@
 #include "CLanGroupServer.h"
 
+UINT __stdcall SessionGroupThread::SessionGroupThreadFunc(void* arg)
+{
+	SessionGroupThread* groupthread = (SessionGroupThread*)arg;
+
+	HANDLE events[2] = { groupthread->m_SessionGroupThreadStopEvent, groupthread->m_RecvEvent };
+	while (true) {
+		DWORD ret = WaitForMultipleObjects(2, events, false, INFINITE);
+		if (ret == WAIT_OBJECT_0) {
+			break;
+		}
+		else if(ret == WAIT_OBJECT_0 + 1) {
+			while (true) {
+				bool isEmpty = true;
+				stSessionRecvBuff recvBuff;
+				groupthread->m_RecvQueueMtx.lock();
+				if (!groupthread->m_RecvQueue.empty()) {
+					recvBuff = groupthread->m_RecvQueue.front();
+					isEmpty = false;
+				}
+				groupthread->m_RecvQueueMtx.unlock();
+
+				if (!isEmpty) {
+					groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
+				}
+			}
+		}
+		else {
+			DebugBreak();
+		}
+	}
+	return 0;
+}
+
+void CLanGroupServer::CreateGroup(GroupID newGroupID, SessionGroupThread* groupThread)
+{
+	if (m_GroupThreads.find(newGroupID) != m_GroupThreads.end()) {
+		DebugBreak();
+	}
+	groupThread->SetServer(this, newGroupID);
+	m_GroupThreads.insert({ newGroupID, groupThread });
+}
+
+void CLanGroupServer::DeleteGroup(GroupID delGroupID)
+{
+	if (m_GroupThreads.find(delGroupID) == m_GroupThreads.end()) {
+		DebugBreak();
+	}
+	delete m_GroupThreads[delGroupID];
+	m_GroupThreads.erase(delGroupID);
+}
+
 void CLanGroupServer::EnterSessionGroup(SessionID sessionID, GroupID enterGroup)
 {
 	AcquireSRWLockExclusive(&m_SessionGroupIDSrwLock);
@@ -46,8 +97,7 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 	// 이벤트 깨움 방식
 	// 1. 데이터 복사
 	std::shared_ptr<JBuffer> recvData = std::make_shared<JBuffer>();
-	size_t copyLen = RecvData(recvBuff, *recvData);
-	recvBuff.DirectMoveEnqueueOffset(copyLen);
+	RecvData(recvBuff, *recvData);
 
 	m_GroupRecvData[groupID].recvQueueMtx.lock();
 	// 2. 큐 삽입
@@ -56,3 +106,4 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 	SetEvent(m_GroupRecvData[groupID].recvEvent);
 	m_GroupRecvData[groupID].recvQueueMtx.unlock();
 }
+
