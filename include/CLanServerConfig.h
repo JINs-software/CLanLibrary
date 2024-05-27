@@ -50,3 +50,14 @@
 #define dfPACKET_KEY		0x32
 
 #define TRACKING_CLIENT_PORT
+
+////////////////////////////////////////////////////
+// TPS(Transaction Per Second)
+////////////////////////////////////////////////////
+#define CALCULATE_TRANSACTION_PER_SECOND
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+#define		ACCEPT_TPS	0
+#define		RECV_TPS	1
+#define		SEND_TPS	2
+#define		NUM_OF_TPS_ITEM		3
+#endif
