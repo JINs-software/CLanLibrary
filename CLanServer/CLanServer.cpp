@@ -19,7 +19,6 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 #else
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
-	bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 	bool beNagle
 )
@@ -121,6 +120,9 @@ bool CLanServer::Start()
 			ResumeThread(m_WorkerThreads[idx]);
 		}
 	}
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	m_CalcTpsThread = (HANDLE)_beginthreadex(NULL, 0, CLanServer::CalcTpsThreadFunc, this, 0, NULL);
+#endif
 
 	OnWorkerThreadCreateDone();
 }
@@ -665,7 +667,9 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 #if defined(SESSION_LOG)
 					clanserver->m_TotalAcceptCnt++;
 #endif
-
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+					clanserver->m_CalcTpsItems[ACCEPT_TPS]++;
+#endif
 #if defined(TRACKING_CLIENT_PORT)
 					newSession->clientPort = clientAddr.sin_port;
 #endif
@@ -904,7 +908,9 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					sendLog.iocnt = session->sessionRef.ioCnt;
 					sendLog.releaseFlag = session->sessionRef.releaseFlag;
 #endif
-
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TPS], session->sendOverlapped.Offset);
+#endif
 					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
 					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
@@ -976,6 +982,32 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 	clanserver->OnWorkerThreadEnd();
 
+	return 0;
+}
+
+UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
+{
+	CLanServer* clanserver = (CLanServer*)arg;
+
+	for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
+		clanserver->m_CalcTpsItems[i] = 0;
+		clanserver->m_TpsItems[i] = 0;
+	}
+
+	while (true) {
+		// TPS 항목 읽기
+		for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
+			clanserver->m_TpsItems[i] = clanserver->m_CalcTpsItems[i];
+		}
+
+		// TPS 항목 전송
+
+		// TPS 항목 초기화
+		for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
+			clanserver->m_CalcTpsItems[i] = 0;
+		}
+		Sleep(1000);
+	}
 	return 0;
 }
 
@@ -1194,6 +1226,11 @@ void CLanServer::ConsoleLog()
 #if defined(SENDBUFF_MONT_LOG)
 	std::cout << "[최대 송신 버퍼 사용 크기]: " << m_SendBuffOfMaxSize << "                                                " << std::endl;
 	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
+#endif
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	std::cout << "Accept TPS : " << m_TpsItems[ACCEPT_TPS] << std::endl;
+	std::cout << "Recv TPS   : " << m_TpsItems[RECV_TPS] << std::endl;
+	std::cout << "Send TPS   : " << m_TpsItems[SEND_TPS] << std::endl;
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)

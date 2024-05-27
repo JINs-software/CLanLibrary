@@ -152,19 +152,26 @@ private:
 	HANDLE m_IOCP;
 
 	/////////////////////////////////
-	// Threads
-	/////////////////////////////////
-	//HANDLE m_ExitEvent;
-	HANDLE m_AcceptThread;
-	UINT16 m_NumOfWorkerThreads;
-	vector<HANDLE> m_WorkerThreads;
-	map<DWORD, bool> m_WorkerThreadStartFlag;
-
-	/////////////////////////////////
 	// Exit
 	/////////////////////////////////
 	bool m_StopFlag;
 
+	/////////////////////////////////
+	// Threads
+	/////////////////////////////////
+	// 1. Accept Thread(single)
+	HANDLE				m_AcceptThread;
+	// 2. IOCP Worker Thread(multi)
+	UINT16				m_NumOfWorkerThreads;
+	vector<HANDLE>		m_WorkerThreads;
+	map<DWORD, bool>	m_WorkerThreadStartFlag;
+
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	HANDLE				m_CalcTpsThread;
+protected:
+	LONG				m_CalcTpsItems[NUM_OF_TPS_ITEM];
+	LONG				m_TpsItems[NUM_OF_TPS_ITEM];
+#endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	/////////////////////////////////
@@ -248,7 +255,6 @@ public:
 #else
 	CLanServer(const char* serverIP, UINT16 serverPort,
 		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
-		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 		bool beNagle = true
 	);
@@ -271,6 +277,11 @@ public:
 #else
 	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr);
 #endif
+	/////////////////////////////////////////////////////////////////
+	// Encode, Decode
+	/////////////////////////////////////////////////////////////////
+	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
+	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
 	
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);
@@ -287,6 +298,9 @@ private:
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);
 	static UINT __stdcall WorkerThreadFunc(void* arg);
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	static UINT	__stdcall CalcTpsThreadFunc(void* arg);
+#endif
 		
 protected:
 	/////////////////////////////////////////////////////////////////
@@ -331,12 +345,6 @@ protected:
 	//virtual void OnWorkerThreadBegin() = 0;
 	//virtual void OnWorkerThreadEnd() = 0;
 	virtual void OnError() {};
-
-	/////////////////////////////////////////////////////////////////
-	// Encode, Decode
-	/////////////////////////////////////////////////////////////////
-	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
-	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
 
 	
 	/////////////////////////////////
