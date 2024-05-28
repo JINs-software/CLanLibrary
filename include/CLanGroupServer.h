@@ -21,6 +21,13 @@ private:
 	std::queue<stSessionRecvBuff>	m_RecvQueue;
 #elif defined(RECV_BUFF_LIST)
 	std::list<stSessionRecvBuff>	m_RecvQueue;
+	std::list<stSessionRecvBuff>	m_RecvQueueTemp;
+	struct stRecvQueueSync {
+		UINT accessCnt : 24;
+		UINT blocked : 8;
+	};
+	stRecvQueueSync					m_RecvQueueSync;
+	stRecvQueueSync					m_RecvQueueSyncTemp;
 #endif
 	HANDLE							m_RecvEvent;
 	UINT							m_temp_PushCnt = 0;
@@ -52,6 +59,12 @@ public:
 	CLanGroupThread()
 #endif
 	{
+#if defined(RECV_BUFF_LIST)
+		m_RecvQueueSync.accessCnt = 0;
+		m_RecvQueueSync.blocked = 0;
+		m_RecvQueueSyncTemp.accessCnt = 0;
+		m_RecvQueueSyncTemp.blocked = 0;
+#endif
 		m_RecvEvent = CreateEvent(NULL, false, false, NULL);
 		m_SessionGroupThreadStopEvent = CreateEvent(NULL, false, false, NULL);
 		m_SessionGroupThread = (HANDLE)_beginthreadex(NULL, 0, SessionGroupThreadFunc, this, 0, NULL);
@@ -83,11 +96,57 @@ public:
 
 		SetEvent(m_RecvEvent);
 #elif defined(RECV_BUFF_LIST)
-		m_RecvQueueMtx.lock();
-		m_RecvQueue.push_back(recvBuff);
-		m_temp_PushCnt++;
-			
+		stRecvQueueSync cmp, exg;
+		cmp = exg = m_RecvQueueSync;
+		cmp.blocked = 0;
+		exg.blocked = 0;
+		exg.accessCnt += 1;
+		do {
+			UINT ret = InterlockedCompareExchange((UINT*)&m_RecvQueueSync, *(UINT*)&exg, *(UINT*)&cmp);
+			stRecvQueueSync* retSync = (stRecvQueueSync*)&ret;
+			if (ret == *(UINT*)&cmp) {
+				m_RecvQueueMtx.lock();
+				m_RecvQueue.push_back(recvBuff);
+				m_temp_PushCnt++;
+				m_RecvQueueMtx.unlock();
+				InterlockedDecrement((UINT*)&m_RecvQueueSync);
+				break;
+			}
+			else if (retSync->blocked == 0) {
+				continue;
+			}
+			else {	// retSync->blocked == 1
+				bool breakFlag = false;
+				do {
+					cmp = exg = m_RecvQueueSyncTemp;
+					cmp.blocked = 0;
+					exg.blocked = 0;
+					exg.accessCnt += 1;
+					ret = InterlockedCompareExchange((UINT*)&m_RecvQueueSyncTemp, *(UINT*)&exg, *(UINT*)&cmp);
+					stRecvQueueSync* retSync = (stRecvQueueSync*)&ret;
+					if (ret == *(UINT*)&cmp) {
+						m_RecvQueueMtx.lock();
+						m_RecvQueueTemp.push_back(recvBuff);
+						m_temp_PushCnt++;
+						m_RecvQueueMtx.unlock();
+						InterlockedDecrement((UINT*)&m_RecvQueueSyncTemp);
+						breakFlag = true;
+						break;
+					}
+					else if (retSync->blocked == 0) {
+						continue;
+					}
+					else {
+						break;
+					}
+				} while (true);
 
+				if (breakFlag) {
+					break;
+				}
+			}
+		} while (true);
+		
 		SetEvent(m_RecvEvent);
 #endif
 	}

@@ -16,9 +16,9 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 		if (ret == WAIT_OBJECT_0) {
 			break;
 		}
-		else if(ret == WAIT_OBJECT_0 + 1) {
-			while (true) {
+		else if (ret == WAIT_OBJECT_0 + 1) {
 #if defined(RECV_BUFF_QUEUE)
+			while (true) {
 				bool isEmpty = true;
 				stSessionRecvBuff recvBuff;
 				groupthread->m_RecvQueueMtx.lock();
@@ -36,46 +36,29 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 				else {
 					break;
 				}
-#elif defined(RECV_BUFF_LIST)
-				groupthread->m_RecvQueueMtx.lock();
-				size_t recvQueueSize = groupthread->m_RecvQueue.size();
-				groupthread->m_RecvQueueMtx.unlock();
-				if (recvQueueSize > 0) {
-					//auto iter = groupthread->m_RecvQueue.begin();
-					//for (; recvQueueSize > 0; iter++, recvQueueSize--) {
-					//	stSessionRecvBuff& recvBuff = *iter;
-					//	groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
-					//
-					//	groupthread->m_temp_PopCnt++;
-					//}
-					//groupthread->m_RecvQueueMtx.lock();
-					//groupthread->m_RecvQueue.erase(groupthread->m_RecvQueue.begin(), iter);
-					//groupthread->m_RecvQueueMtx.unlock();
-					// => Connect 미 처리 발생
-
-					auto iter = groupthread->m_RecvQueue.begin();
-					while (true) {
-						stSessionRecvBuff& recvBuff = *iter;
-						groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
-						groupthread->m_temp_PopCnt++;
-
-						if (--recvQueueSize > 0) {
-							iter++;
-						}
-						else {
-							break;
-						}
-					}
-					groupthread->m_RecvQueueMtx.lock();
-					iter++;
-					groupthread->m_RecvQueue.erase(groupthread->m_RecvQueue.begin(), iter);
-					groupthread->m_RecvQueueMtx.unlock();
-				}
-				else {
-					break;
-				}
-#endif
 			}
+#elif defined(RECV_BUFF_LIST)
+			stRecvQueueSync blocked;
+			blocked.blocked = 1;
+			blocked.accessCnt = 0;
+			InterlockedOr((LONG*)&groupthread->m_RecvQueueSync, *(LONG*)&blocked);
+			while (groupthread->m_RecvQueueSync.accessCnt != 0);
+
+			auto iter = groupthread->m_RecvQueue.begin();
+			for (auto iter = groupthread->m_RecvQueue.begin(); iter != groupthread->m_RecvQueue.end(); iter++) {
+				stSessionRecvBuff& recvBuff = *iter;
+				groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
+				groupthread->m_temp_PopCnt++;
+			}
+			groupthread->m_RecvQueue.clear();
+
+			InterlockedOr((LONG*)&groupthread->m_RecvQueueSyncTemp, *(LONG*)&blocked);
+			while (groupthread->m_RecvQueueSyncTemp.accessCnt != 0);
+
+			groupthread->m_RecvQueue.swap(groupthread->m_RecvQueueTemp);
+			InterlockedXor((LONG*)&groupthread->m_RecvQueueSync, *(LONG*)&blocked);
+			InterlockedXor((LONG*)&groupthread->m_RecvQueueSyncTemp, *(LONG*)&blocked);
+#endif
 		}
 		else {
 			DebugBreak();
