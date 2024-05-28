@@ -12,10 +12,19 @@ struct stSessionRecvBuff {
 // 전방 선언
 class CLanGroupServer;
 
+//#define RECV_BUFF_QUEUE
+#define RECV_BUFF_LIST
+
 class CLanGroupThread {
 private:
+#if defined(RECV_BUFF_QUEUE)
 	std::queue<stSessionRecvBuff>	m_RecvQueue;
+#elif defined(RECV_BUFF_LIST)
+	std::list<stSessionRecvBuff>	m_RecvQueue;
+#endif
 	HANDLE							m_RecvEvent;
+	UINT							m_temp_PushCnt = 0;
+	UINT							m_temp_PopCnt = 0;
 	std::mutex						m_RecvQueueMtx;
 
 	HANDLE							m_SessionGroupThread;
@@ -25,9 +34,23 @@ private:
 
 protected:
 	GroupID							m_GroupID;
+
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	TlsMemPoolManager<JBuffer>* m_SerialBuffPoolMgr;
+	bool						m_SetTlsMemPoolFlag;
+	size_t						m_TlsMemPoolUnitCnt;
+	size_t						m_TlsMemPoolCapacity;
+#endif
+
+	UINT32						m_ProcCnt = 0;
 	
 public:
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	CLanGroupThread(bool setTlsMemPool, size_t tlsMemPoolUnitCnt, size_t tlsMemPoolCapacity)
+		: m_SetTlsMemPoolFlag(setTlsMemPool), m_TlsMemPoolUnitCnt(tlsMemPoolUnitCnt), m_TlsMemPoolCapacity(tlsMemPoolCapacity)
+#else 
 	CLanGroupThread()
+#endif
 	{
 		m_RecvEvent = CreateEvent(NULL, false, false, NULL);
 		m_SessionGroupThreadStopEvent = CreateEvent(NULL, false, false, NULL);
@@ -37,17 +60,36 @@ public:
 		SetEvent(m_SessionGroupThreadStopEvent);
 		WaitForSingleObject(m_SessionGroupThread, INFINITE);
 	}
-	void SetServer(CLanGroupServer* clanGroupServer, GroupID groupID) {
+
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	void InitGroupThread(CLanGroupServer* clanGroupServer, GroupID groupID, TlsMemPoolManager<JBuffer>* serialBuffPoolMgr) {
+		m_ClanGroupServer = clanGroupServer;
+		m_GroupID = groupID;
+		m_SerialBuffPoolMgr = serialBuffPoolMgr;
+	}
+#else
+	void InitGroupThread(CLanGroupServer* clanGroupServer, GroupID groupID) {
 		m_ClanGroupServer = clanGroupServer;
 		m_GroupID = groupID;
 	}
+#endif
 
 	void PushRecvBuff(stSessionRecvBuff& recvBuff) {
+#if defined(RECV_BUFF_QUEUE)
 		m_RecvQueueMtx.lock();
 		m_RecvQueue.push(recvBuff);
+		m_temp_PushCnt++;
 		m_RecvQueueMtx.unlock();
 
 		SetEvent(m_RecvEvent);
+#elif defined(RECV_BUFF_LIST)
+		m_RecvQueueMtx.lock();
+		m_RecvQueue.push_back(recvBuff);
+		m_temp_PushCnt++;
+			
+
+		SetEvent(m_RecvEvent);
+#endif
 	}
 
 private:
@@ -55,6 +97,10 @@ private:
 	static UINT __stdcall SessionGroupThreadFunc(void* arg);
 
 protected:
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	JBuffer* GetSerialSendBuff();
+#endif
+
 	void Disconnect(uint64 sessionID);
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
 	void ForwardSessionGroup(SessionID sessionID, GroupID to);

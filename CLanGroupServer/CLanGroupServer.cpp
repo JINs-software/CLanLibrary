@@ -4,6 +4,12 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 {
 	CLanGroupThread* groupthread = (CLanGroupThread*)arg;
 
+	groupthread->OnStart();
+
+	if (groupthread->m_SetTlsMemPoolFlag) {
+		groupthread->m_SerialBuffPoolMgr->AllocTlsMemPool(groupthread->m_TlsMemPoolUnitCnt, groupthread->m_TlsMemPoolCapacity);
+	}
+
 	HANDLE events[2] = { groupthread->m_SessionGroupThreadStopEvent, groupthread->m_RecvEvent };
 	while (true) {
 		DWORD ret = WaitForMultipleObjects(2, events, false, INFINITE);
@@ -12,12 +18,14 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 		}
 		else if(ret == WAIT_OBJECT_0 + 1) {
 			while (true) {
+#if defined(RECV_BUFF_QUEUE)
 				bool isEmpty = true;
 				stSessionRecvBuff recvBuff;
 				groupthread->m_RecvQueueMtx.lock();
 				if (!groupthread->m_RecvQueue.empty()) {
 					recvBuff = groupthread->m_RecvQueue.front();
 					groupthread->m_RecvQueue.pop();
+					groupthread->m_temp_PopCnt++;
 					isEmpty = false;
 				}
 				groupthread->m_RecvQueueMtx.unlock();
@@ -28,6 +36,45 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 				else {
 					break;
 				}
+#elif defined(RECV_BUFF_LIST)
+				groupthread->m_RecvQueueMtx.lock();
+				size_t recvQueueSize = groupthread->m_RecvQueue.size();
+				groupthread->m_RecvQueueMtx.unlock();
+				if (recvQueueSize > 0) {
+					//auto iter = groupthread->m_RecvQueue.begin();
+					//for (; recvQueueSize > 0; iter++, recvQueueSize--) {
+					//	stSessionRecvBuff& recvBuff = *iter;
+					//	groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
+					//
+					//	groupthread->m_temp_PopCnt++;
+					//}
+					//groupthread->m_RecvQueueMtx.lock();
+					//groupthread->m_RecvQueue.erase(groupthread->m_RecvQueue.begin(), iter);
+					//groupthread->m_RecvQueueMtx.unlock();
+					// => Connect 미 처리 발생
+
+					auto iter = groupthread->m_RecvQueue.begin();
+					while (true) {
+						stSessionRecvBuff& recvBuff = *iter;
+						groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
+						groupthread->m_temp_PopCnt++;
+
+						if (--recvQueueSize > 0) {
+							iter++;
+						}
+						else {
+							break;
+						}
+					}
+					groupthread->m_RecvQueueMtx.lock();
+					iter++;
+					groupthread->m_RecvQueue.erase(groupthread->m_RecvQueue.begin(), iter);
+					groupthread->m_RecvQueueMtx.unlock();
+				}
+				else {
+					break;
+				}
+#endif
 			}
 		}
 		else {
@@ -35,6 +82,13 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 		}
 	}
 	return 0;
+}
+
+JBuffer* CLanGroupThread::GetSerialSendBuff()
+{
+	JBuffer* serialSendBuff = m_SerialBuffPoolMgr->GetTlsMemPool().AllocMem();
+	serialSendBuff->ClearBuffer();
+	return serialSendBuff;
 }
 
 void CLanGroupThread::Disconnect(uint64 sessionID) {
@@ -67,7 +121,11 @@ void CLanGroupServer::CreateGroup(GroupID newGroupID, CLanGroupThread* groupThre
 	if (m_GroupThreads.find(newGroupID) != m_GroupThreads.end()) {
 		DebugBreak();
 	}
-	groupThread->SetServer(this, newGroupID);
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	groupThread->InitGroupThread(this, newGroupID, &m_SerialBuffPoolMgr);
+#else
+	groupThread->InitGroupThread(this, newGroupID);
+#endif
 	m_GroupThreads.insert({ newGroupID, groupThread });
 }
 
@@ -135,7 +193,7 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 
 	// 이벤트 깨움 방식
 	// 1. 데이터 복사
-	std::shared_ptr<JBuffer> recvData = std::make_shared<JBuffer>();
+	std::shared_ptr<JBuffer> recvData = std::make_shared<JBuffer>(recvBuff.GetUseSize());
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
 	UINT recvCnt = RecvData(recvBuff, *recvData);
 	InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], recvCnt);
