@@ -169,6 +169,7 @@ private:
 	// 2. IOCP Worker Thread(multi)
 	UINT16				m_NumOfWorkerThreads;
 	vector<HANDLE>		m_WorkerThreads;
+	vector<DWORD>		m_WorkerThreadIDs;
 	map<DWORD, bool>	m_WorkerThreadStartFlag;
 
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)

@@ -82,6 +82,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 		m_NumOfWorkerThreads = si.dwNumberOfProcessors;
 	}
 	m_WorkerThreads.resize(m_NumOfWorkerThreads, NULL);
+	m_WorkerThreadIDs.resize(m_NumOfWorkerThreads, NULL);
 	
 }
 CLanServer::~CLanServer()
@@ -109,6 +110,7 @@ bool CLanServer::Start()
 			DebugBreak();
 		}
 		DWORD thID = GetThreadId(m_WorkerThreads[idx]);
+		m_WorkerThreadIDs[idx] = thID;
 		m_WorkerThreadStartFlag.insert({thID, true});
 		if (!OnWorkerThreadCreate(m_WorkerThreads[idx])) {
 			m_WorkerThreadStartFlag[thID] = false;
@@ -473,11 +475,23 @@ void CLanServer::SendPost(uint64 sessionID)
 
 					assert(sessionRef.ioCnt >= 0);
 					if (sessionRef.ioCnt == 0) {
-						HANDLE thHnd = GetCurrentThread();
-
 						bool workerFlag = false;
+
+						//HANDLE thHnd = GetCurrentThread();
+						//for (int i = 0; i < m_NumOfWorkerThreads; i++) {
+						//	if (m_WorkerThreads[i] == thHnd) {
+						//		if (DeleteSession(sessionID, "SendPost, WSASendFail")) {
+						//			OnClientLeave(sessionID);
+						//		}
+						//		workerFlag = true;
+						//		break;
+						//	}
+						//}
+						// => 가상 핸들 반환 시 m_WorkerThreads의 핸들과 비교하기 위해선 DuplicateHandle로 실제 핸들을 반환해야 함.
+						// => 간단히 스레드 ID로 비교 확인하는 방식으로 변경
+						DWORD thID = GetCurrentThreadId();
 						for (int i = 0; i < m_NumOfWorkerThreads; i++) {
-							if (m_WorkerThreads[i] == thHnd) {
+							if (m_WorkerThreadIDs[i] == thID) {
 								if (DeleteSession(sessionID, "SendPost, WSASendFail")) {
 									OnClientLeave(sessionID);
 								}
