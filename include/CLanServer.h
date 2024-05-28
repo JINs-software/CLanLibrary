@@ -55,6 +55,10 @@ class CLanServer
 		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE)
 #endif
 		{
+#if !defined(ALLOC_BY_TLS_MEM_POOL)
+			// 동적 재할당으로 인한 결함 방지
+			sendBufferVector.reserve(SESSION_SEND_BUFFER_DEFAULT_SIZE);
+#endif
 			Id.idx = 0;
 			Id.incremental = 0;
 			uiId = 0;
@@ -80,9 +84,10 @@ class CLanServer
 			sock = _sock;
 			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
 			memset(&sendOverlapped, 0, sizeof(WSAOVERLAPPED));
-			if (recvRingBuffer.GetUseSize() > 0) {
-				DebugBreak();
-			}
+			//if (recvRingBuffer.GetUseSize() > 0) {
+			//	DebugBreak();
+			//}
+			// => 채팅 서버 테스트 용, 채팅 서버에서는 더미 클라이언트의 송신->수신->종료 순
 			recvRingBuffer.ClearBuffer();
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 			if (sendRingBuffer.GetUseSize() > 0) {
@@ -171,6 +176,7 @@ private:
 protected:
 	LONG				m_CalcTpsItems[NUM_OF_TPS_ITEM];
 	LONG				m_TpsItems[NUM_OF_TPS_ITEM];
+	LONG				m_TotalTransaction[NUM_OF_TPS_ITEM];
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)

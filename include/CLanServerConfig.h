@@ -56,8 +56,9 @@
 ////////////////////////////////////////////////////
 #define CALCULATE_TRANSACTION_PER_SECOND
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
-#define		ACCEPT_TPS	0
-#define		RECV_TPS	1
-#define		SEND_TPS	2
-#define		NUM_OF_TPS_ITEM		3
+#define		ACCEPT_TRANSACTION		0
+#define		RECV_TRANSACTION		1
+#define		SEND_TRANSACTION		2
+#define		SEND_REQ_TRANSACTION	3
+#define		NUM_OF_TPS_ITEM		4
 #endif

@@ -454,6 +454,9 @@ void CLanServer::SendPost(uint64 sessionID)
 			wsasendLog.iocnt = session->sessionRef.ioCnt;
 			wsasendLog.releaseFlag = session->sessionRef.releaseFlag;
 #endif
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+			InterlockedAdd(&m_TotalTransaction[SEND_REQ_TRANSACTION], sendLimit);
+#endif
 
 			if (WSASend(session->sock, wsabuffs, sendLimit, NULL, 0, &session->sendOverlapped, NULL) == SOCKET_ERROR) {
 #if defined(SESSION_LOG)
@@ -668,7 +671,8 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 					clanserver->m_TotalAcceptCnt++;
 #endif
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
-					clanserver->m_CalcTpsItems[ACCEPT_TPS]++;
+					clanserver->m_CalcTpsItems[ACCEPT_TRANSACTION]++;
+					clanserver->m_TotalTransaction[ACCEPT_TRANSACTION]++;
 #endif
 #if defined(TRACKING_CLIENT_PORT)
 					newSession->clientPort = clientAddr.sin_port;
@@ -909,7 +913,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					sendLog.releaseFlag = session->sessionRef.releaseFlag;
 #endif
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
-					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TPS], session->sendOverlapped.Offset);
+					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TRANSACTION], session->sendOverlapped.Offset);
+					InterlockedAdd(&clanserver->m_TotalTransaction[SEND_TRANSACTION], session->sendOverlapped.Offset);
 #endif
 					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
 					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
@@ -992,12 +997,14 @@ UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
 	for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
 		clanserver->m_CalcTpsItems[i] = 0;
 		clanserver->m_TpsItems[i] = 0;
+		clanserver->m_TotalTransaction[i] = 0;
 	}
 
 	while (true) {
 		// TPS 항목 읽기
 		for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
 			clanserver->m_TpsItems[i] = clanserver->m_CalcTpsItems[i];
+			//clanserver->m_TotalTransaction[i] += clanserver->m_CalcTpsItems[i];
 		}
 
 		// TPS 항목 전송
@@ -1228,9 +1235,13 @@ void CLanServer::ConsoleLog()
 	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
 #endif
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
-	std::cout << "Accept TPS : " << m_TpsItems[ACCEPT_TPS] << std::endl;
-	std::cout << "Recv TPS   : " << m_TpsItems[RECV_TPS] << std::endl;
-	std::cout << "Send TPS   : " << m_TpsItems[SEND_TPS] << std::endl;
+	std::cout << "Accept TPS      : " << m_TpsItems[ACCEPT_TRANSACTION] << std::endl;
+	std::cout << "Accept Total    : " << m_TotalTransaction[ACCEPT_TRANSACTION] << std::endl;
+	std::cout << "Recv TPS        : " << m_TpsItems[RECV_TRANSACTION] << std::endl;
+	std::cout << "Recv Total      : " << m_TotalTransaction[RECV_TRANSACTION] << std::endl;
+	std::cout << "Send TPS        : " << m_TpsItems[SEND_TRANSACTION] << std::endl;
+	std::cout << "Send Total      : " << m_TotalTransaction[SEND_TRANSACTION] << std::endl;
+	std::cout << "Send(REQ) Total : " << m_TotalTransaction[SEND_REQ_TRANSACTION] << std::endl;
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)

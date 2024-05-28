@@ -25,6 +25,9 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 				if (!isEmpty) {
 					groupthread->OnRecv(recvBuff.sessionID, *recvBuff.recvData);
 				}
+				else {
+					break;
+				}
 			}
 		}
 		else {
@@ -135,19 +138,13 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 	std::shared_ptr<JBuffer> recvData = std::make_shared<JBuffer>();
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
 	UINT recvCnt = RecvData(recvBuff, *recvData);
-	InterlockedAdd(&m_CalcTpsItems[RECV_TPS], recvCnt);
+	InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], recvCnt);
+	InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], recvCnt);
 #else 
 	RecvData(recvBuff, *recvData);
 #endif
 
-
 	stSessionRecvBuff sessionRecvBuff{ sessionID, recvData };
 	m_GroupThreads[groupID]->PushRecvBuff(sessionRecvBuff);
-	//m_GroupRecvData[groupID].recvQueueMtx.lock();
-	// 2. 큐 삽입
-	//m_GroupRecvData[groupID].recvQueue.push({ sessionID, recvData });
-	//// 3. 이벤트 On
-	//SetEvent(m_GroupRecvData[groupID].recvEvent);
-	//m_GroupRecvData[groupID].recvQueueMtx.unlock();
 }
 
