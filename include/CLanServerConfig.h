@@ -42,14 +42,9 @@
 ////////////////////////////////////////////////////
 // 로그(log)
 ////////////////////////////////////////////////////
-#define SESSION_LOG		// 세션 삭제(및 생성) 추적 로그
-#define SENDBUFF_MONT_LOG		// 송신 버퍼 모니터링용 로그
-
-
-#define dfPACKET_CODE		0x77
-#define dfPACKET_KEY		0x32
-
-#define TRACKING_CLIENT_PORT
+#define SESSION_LOG				// 세션 삭제(및 생성) 추적 로그
+//#define SENDBUFF_MONT_LOG		// 송신 버퍼 모니터링용 로그
+//#define TRACKING_CLIENT_PORT
 
 ////////////////////////////////////////////////////
 // TPS(Transaction Per Second)
