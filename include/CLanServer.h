@@ -1,18 +1,16 @@
 #pragma once
 #include "SocketUtil.h"
-
-#include "CLanServerConfig.h"
+#include <assert.h>
 
 #define JBUFF_DIRPTR_MANUAL_RESET
 #include "JBuffer.h"
 
-#define SESSION_LOG
-
+#include "CLanServerConfig.h"
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #include "TlsMemPool.h"
 #endif
+#include "CommonProtocol.h"
 
-#include <assert.h>
 
 class CLanServer
 {
@@ -187,6 +185,50 @@ protected:
 protected:
 	TlsMemPoolManager<JBuffer> m_SerialBuffPoolMgr;
 	DWORD m_SerialBuffPoolIdx;
+	inline JBuffer* AllocSerialBuff() {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+		msg->ClearBuffer();
+		return msg;
+	}
+	inline JBuffer* AllocSerialBuff(const std::string& log) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
+		msg->ClearBuffer();
+		return msg;
+	}
+	inline JBuffer* AllocSerialSendBuff(USHORT length) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+		msg->ClearBuffer();
+
+		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
+		hdr->code = dfPACKET_CODE;
+		hdr->len = length;
+		hdr->randKey = (BYTE)(-1);	// Encode 전 송신 직렬화 버퍼 식별
+
+		return msg;
+	}
+	inline JBuffer* AllocSerialSendBuff(USHORT length, const std::string& log) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
+		msg->ClearBuffer();
+
+		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
+		hdr->code = dfPACKET_CODE;
+		hdr->len = length;
+		hdr->randKey = (BYTE)(-1);
+
+		return msg;
+	}
+	inline void FreeSerialBuff(JBuffer* buff) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff);
+	}
+	inline void FreeSerialBuff(JBuffer* buff, const std::string& log) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff, log);
+	}
+	inline void AddRefSerialBuff(JBuffer* buff) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1);
+	}
+	inline void AddRefSerialBuff(JBuffer* buff, const std::string& log) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1, log);
+	}
 #endif
 
 	/////////////////////////////////
@@ -284,11 +326,6 @@ public:
 #else
 	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr);
 #endif
-	/////////////////////////////////////////////////////////////////
-	// Encode, Decode
-	/////////////////////////////////////////////////////////////////
-	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
-	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
 	
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);
@@ -353,6 +390,15 @@ protected:
 	//virtual void OnWorkerThreadEnd() = 0;
 	virtual void OnError() {};
 
+
+private:
+	/////////////////////////////////////////////////////////////////
+	// Process Recv/Send message, Encode, Decode
+	/////////////////////////////////////////////////////////////////
+	bool ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer);
+	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
+	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
+	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer& ringPayloads);
 	
 	/////////////////////////////////
 	// 모니터링 항목

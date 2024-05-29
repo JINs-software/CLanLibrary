@@ -2,7 +2,6 @@
 #include <cassert>
 #include <process.h>
 #include <fstream>
-
 #include <cstdlib> // system 함수를 사용하기 위해 필요
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
@@ -194,10 +193,17 @@ void CLanServer::Disconnect(uint64 sessionID)
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
+bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {	// sendDataPtr의 deqOffset은 0으로 가정
 
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
+
+		// 인코딩 수행
+		stMSG_HDR* hdr = (stMSG_HDR*)sendDataPtr->GetDequeueBufferPtr();
+		if (hdr->randKey == (BYTE)-1) {
+			hdr->randKey = rand() % UINT8_MAX;
+			Encode(hdr->randKey, hdr->len, hdr->checkSum, sendDataPtr->GetBufferPtr(sizeof(stMSG_HDR)));
+		}
 
 		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 
@@ -860,7 +866,9 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 #endif
 
 					session->recvRingBuffer.DirectMoveEnqueueOffset(transferred);
-					clanserver->OnRecv(session->uiId, session->recvRingBuffer);	// OnRecv 함수에서는 에코 송신을 수행한다. 
+					//clanserver->OnRecv(session->uiId, session->recvRingBuffer);	// OnRecv 함수에서는 에코 송신을 수행한다. 
+					// => 공통 헤더 라이브러리 단으로 이동, 디코딩 수행
+					clanserver->ProcessReceiveMessage(session->uiId, session->recvRingBuffer);
 
 					session->clearRecvOverlapped();
 					WSABUF wsabuf;
@@ -1085,6 +1093,33 @@ void CLanServer::OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_pt
 }
 #endif
 
+bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer)
+{
+	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
+		stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
+		if (hdr->code != dfPACKET_CODE) {
+			DebugBreak();
+			return false;
+		}
+		if (recvRingBuffer.GetUseSize() < sizeof(stMSG_HDR) + hdr->len) {
+			break;
+		}
+		recvRingBuffer.DirectMoveDequeueOffset(sizeof(stMSG_HDR));
+
+		if (!Decode(hdr->randKey, hdr->len, hdr->checkSum, recvRingBuffer)) {
+			DebugBreak();
+			return false;
+		}
+
+		JSerBuffer recvBuff(recvRingBuffer, hdr->len, true);
+		OnRecv(sessionID, recvBuff);
+
+		recvRingBuffer.DirectMoveDequeueOffset(hdr->len);
+	}
+
+	return true;
+}
+
 void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads) {
 	BYTE payloadSum = 0;
 	for (USHORT i = 0; i < payloadLen; i++) {
@@ -1109,28 +1144,72 @@ bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* pa
 	BYTE Pb = checkSum ^ (dfPACKET_KEY + 1);
 	BYTE payloadSum = Pb ^ (randKey + 1);
 	BYTE Eb = checkSum;
+	BYTE Pn;
+	BYTE Dn;
+	BYTE payloadSumCmp = 0;
 
 	for (USHORT i = 1; i <= payloadLen; i++) {
-		BYTE Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
-		BYTE Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+		Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
 
 		Pb = Pn;
 		Eb = payloads[i - 1];
 		payloads[i - 1] = Dn;
-	}
-
-	// checksum 검증
-	BYTE payloadSumCmp = 0;
-	for (USHORT i = 0; i < payloadLen; i++) {
-		payloadSumCmp += payloads[i];
+		payloadSumCmp += payloads[i - 1];
 		payloadSumCmp %= 256;
 	}
+
 	if (payloadSum != payloadSumCmp) {
 		DebugBreak();
 		return false;
 	}
 
 	return true;
+}
+bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer& ringPayloads) {
+	if (ringPayloads.GetDirectDequeueSize() >= payloadLen) {
+		return Decode(randKey, payloadLen, checkSum, ringPayloads.GetDequeueBufferPtr());
+	}
+	else {
+		BYTE Pb = checkSum ^ (dfPACKET_KEY + 1);
+		BYTE payloadSum = Pb ^ (randKey + 1);
+		BYTE Eb = checkSum;
+		BYTE Pn, Dn;
+		BYTE payloadSumCmp = 0;
+
+		UINT offset = ringPayloads.GetDeqOffset();
+		BYTE* bytepayloads = ringPayloads.GetBeginBufferPtr();
+		//for (USHORT i = 1; i <= payloadLen; i++) {
+		//	offset = offset % (ringPayloads.GetBufferSize() + 1);
+		//	Pn = bytepayloads[offset + i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		//	Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+		//
+		//	Pb = Pn;
+		//	Eb = bytepayloads[offset + i - 1];
+		//	bytepayloads[offset + i - 1] = Dn;
+		//	payloadSumCmp += bytepayloads[offset + i - 1];
+		//	payloadSumCmp %= 256;
+		//}
+		for (USHORT i = 1; i <= payloadLen; i++, offset++) {
+			offset = offset % (ringPayloads.GetBufferSize() + 1);
+			Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+			Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+
+			Pb = Pn;
+			Eb = bytepayloads[offset];
+			bytepayloads[offset] = Dn;
+			payloadSumCmp += bytepayloads[offset];
+			payloadSumCmp %= 256;
+		}
+		
+
+		if (payloadSum != payloadSumCmp) {
+			DebugBreak();
+			return false;
+		}
+
+		return true;
+	}
 }
 
 

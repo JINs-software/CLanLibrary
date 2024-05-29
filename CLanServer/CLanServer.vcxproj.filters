@@ -6,5 +6,6 @@
   <ItemGroup>
     <ClInclude Include="..\include\CLanServer.h" />
     <ClInclude Include="..\include\CLanServerConfig.h" />
+    <ClInclude Include="..\include\CommonProtocol.h" />
   </ItemGroup>
 </Project>

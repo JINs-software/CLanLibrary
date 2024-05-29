@@ -24,6 +24,7 @@
   <ItemGroup>
     <ClInclude Include="..\include\CLanServer.h" />
     <ClInclude Include="..\include\CLanServerConfig.h" />
+    <ClInclude Include="..\include\CommonProtocol.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
