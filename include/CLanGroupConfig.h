@@ -1,0 +1,5 @@
+#pragma once
+
+//#define SETEVENT_RECEIVE_EVENT
+#define POLLING_RECEIVE_EVENT
+//#define POLLING_SESSION_MESSAGE_QUEUE
