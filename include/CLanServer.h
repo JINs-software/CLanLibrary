@@ -176,13 +176,18 @@ protected:
 	LONG				m_CalcTpsItems[NUM_OF_TPS_ITEM];
 	LONG				m_TpsItems[NUM_OF_TPS_ITEM];
 	LONG				m_TotalTransaction[NUM_OF_TPS_ITEM];
+public:
+	inline void IncrementRecvTransaction(LONG cnt = 1) {
+		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], cnt);
+		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], cnt);
+	}
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	/////////////////////////////////
 	// Memory Pool
 	/////////////////////////////////
-protected:
+public:
 	TlsMemPoolManager<JBuffer> m_SerialBuffPoolMgr;
 	DWORD m_SerialBuffPoolIdx;
 	inline JBuffer* AllocSerialBuff() {
