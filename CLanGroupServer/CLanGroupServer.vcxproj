@@ -22,6 +22,7 @@
     <ClCompile Include="CLanGroupServer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\CLanGroupConfig.h" />
     <ClInclude Include="..\include\CLanGroupServer.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

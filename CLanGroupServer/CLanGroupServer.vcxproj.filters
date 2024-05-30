@@ -5,5 +5,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\CLanGroupServer.h" />
+    <ClInclude Include="..\include\CLanGroupConfig.h" />
   </ItemGroup>
 </Project>
