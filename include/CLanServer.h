@@ -389,7 +389,11 @@ protected:
 	virtual void OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_ptr<JBuffer>>& sendBufferVec);
 #endif
 	virtual void OnClientLeave(UINT64 sessionID) = 0;
+#if defined(ON_RECV_BUFFERING)
+	virtual void OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue) = 0;
+#else
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) = 0;
+#endif
 	//virtual void OnSend() = 0;
 	//virtual void OnWorkerThreadBegin() = 0;
 	//virtual void OnWorkerThreadEnd() = 0;

@@ -1120,6 +1120,35 @@ void CLanServer::OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_pt
 
 bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer)
 {
+#if defined(ON_RECV_BUFFERING)
+	std::queue<JBuffer> bufferedQueue;
+	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
+		//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
+		// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
+		//	  따라서 복사 비용이 들긴 하지만 Peek을 하는 것이 안전
+		stMSG_HDR hdr;
+		recvRingBuffer.Peek(&hdr);
+		if (hdr.code != dfPACKET_CODE) {
+			DebugBreak();
+			return false;
+		}
+		if (recvRingBuffer.GetUseSize() < sizeof(stMSG_HDR) + hdr.len) {
+			break;
+		}
+		recvRingBuffer.DirectMoveDequeueOffset(sizeof(stMSG_HDR));
+
+		if (!Decode(hdr.randKey, hdr.len, hdr.checkSum, recvRingBuffer)) {
+			DebugBreak();
+			return false;
+		}
+
+		JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
+		bufferedQueue.push(recvBuff);
+
+		recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
+	}
+	OnRecv(sessionID, bufferedQueue);
+#else
 	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
 		//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
 		// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
@@ -1145,6 +1174,7 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 
 		recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
 	}
+#endif
 
 	return true;
 }

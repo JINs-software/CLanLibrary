@@ -1,14 +1,24 @@
 #pragma once
 #include "CLanServer.h"
 #include "CLanGroupConfig.h"
+#if defined(POLLING_LOCKFREE_QUEUE)
+#include "LockFreeQueue.h"
+#endif
 
 using SessionID = UINT64;
 using GroupID = UINT16;
 
+#if defined(ON_RECV_BUFFERING)
+struct stSessionRecvBuff {
+	SessionID	sessionID;
+	std::queue<std::shared_ptr<JBuffer>> recvDataBuffered;
+};
+#else
 struct stSessionRecvBuff {
 	SessionID	sessionID;
 	std::shared_ptr<JBuffer> recvData;
 };
+#endif
 
 //#define RECV_BUFF_QUEUE
 #define RECV_BUFF_LIST
@@ -38,12 +48,25 @@ public:
 					uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize)
 		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, sessionSendBuffSize, sessionRecvBuffSize) {}
 #endif
+
+public:
+	UINT16	m_ActiveGroupThread = 0;
+	UINT16	m_Cnt = 0;
+
 private:
 	// 세션 - 세션 그룹 식별 자료구조
 	std::unordered_map<SessionID, GroupID>	m_SessionGroupID;
 	SRWLOCK									m_SessionGroupIDSrwLock;
 	// 그룹 별 이벤트
 	std::map<GroupID, CLanGroupThread*>		m_GroupThreads;
+
+public:
+	//void Stop() {
+	//	for (auto iter : m_GroupThreads) {
+	//		iter.second->StopGroupThread();
+	//	}
+	//	CLanServer::Stop();
+	//}
 
 public:
 	// 그룹 생성 (그룹 식별자 반환, 라이브러리와 컨텐츠는 그룹 식별자를 통해 식별)
@@ -54,7 +77,7 @@ public:
 	void EnterSessionGroup(SessionID sessionID, GroupID enterGroup);
 	void LeaveSessionGroup(SessionID sessionID);
 	void ForwardSessionGroup(SessionID sessionID, GroupID from, GroupID to);
-	void PostMsgToThreadGroup(GroupID groupID, JBuffer& msg);
+	//void PostMsgToThreadGroup(GroupID groupID, JBuffer& msg);
 
 protected:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };
@@ -68,9 +91,18 @@ protected:
 	virtual void OnClientLeave(SessionID sessionID) {};
 	//virtual UINT RecvData(JBuffer& recvBuff, JBuffer& dest) = 0;
 
+	virtual void ServerConsoleLog() {
+		std::cout << "Active Group Thread: " << m_ActiveGroupThread << std::endl;
+		std::cout << "Dequeue Fail Cnt: " << m_Cnt << std::endl;
+	}
+
 private:
 	// 세션 그룹을 분류함
+#if defined(ON_RECV_BUFFERING)
+	virtual void OnRecv(SessionID sessionID, std::queue<JBuffer>& recvBuff);
+#else
 	virtual void OnRecv(SessionID sessionID, JBuffer& recvBuff);
+#endif
 };
 
 class CLanGroupThread {
@@ -100,6 +132,9 @@ private:
 	SessionQueueMap	m_SessionMsgQueueMap;
 	SRWLOCK							m_SessionMsgQueueSRWLock;
 	BOOL							m_SessionGroupThreadStopFlag = false;
+#elif defined(POLLING_LOCKFREE_QUEUE)
+	LockFreeQueue<std::pair<SessionID, JBuffer*>>		m_LockFreeMessageQueue;
+	BOOL									m_SessionGroupThreadStopFlag = false;
 #endif
 
 	UINT							m_temp_PushCnt = 0;
@@ -164,7 +199,16 @@ public:
 	}
 #endif
 
+	void StopGroupThread() {
+		m_SessionGroupThreadStopFlag = true;
+	}
+
+#if defined(ON_RECV_BUFFERING)
+	void PushRecvBuff(stSessionRecvBuff& bufferedRecvData);
+#else 
 	void PushRecvBuff(stSessionRecvBuff& recvBuff);
+	void PushRecvBuff(SessionID sessionID, JBuffer* recvData);
+#endif
 
 private:
 	// 이벤트를 받고, 메시지를 읽어 OnRecv 호출
@@ -203,10 +247,17 @@ protected:
 	}
 #endif
 
+	inline void IncrementServerCnt() {
+		m_ClanGroupServer->m_Cnt++;
+	}
+	inline void SetServerCnt(UINT16 cnt) {
+		m_ClanGroupServer->m_Cnt = cnt;
+	}
+
 	void Disconnect(uint64 sessionID);
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
 	void ForwardSessionGroup(SessionID sessionID, GroupID to);
-	void PostMsgToThreadGroup(GroupID groupID, JBuffer& msg);
+	//void PostMsgToThreadGroup(GroupID groupID, JBuffer& msg);
 
 	//void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
 	//bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);

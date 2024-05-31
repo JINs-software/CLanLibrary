@@ -18,6 +18,7 @@ void CLanGroupServer::DeleteGroup(GroupID delGroupID)
 	if (m_GroupThreads.find(delGroupID) == m_GroupThreads.end()) {
 		DebugBreak();
 	}
+	m_GroupThreads[delGroupID]->StopGroupThread();
 	delete m_GroupThreads[delGroupID];
 	m_GroupThreads.erase(delGroupID);
 }
@@ -52,11 +53,38 @@ void CLanGroupServer::ForwardSessionGroup(SessionID sessionID, GroupID from, Gro
 	ReleaseSRWLockExclusive(&m_SessionGroupIDSrwLock);
 }
 
-void CLanGroupServer::PostMsgToThreadGroup(GroupID, JBuffer& msg)
+#if defined(ON_RECV_BUFFERING)
+void CLanGroupServer::OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue)
 {
+	AcquireSRWLockShared(&m_SessionGroupIDSrwLock);
+	if (m_SessionGroupID.find(sessionID) == m_SessionGroupID.end()) {
+		DebugBreak();
+	}
+	UINT16 groupID = m_SessionGroupID[sessionID];
+	ReleaseSRWLockShared(&m_SessionGroupIDSrwLock);
+
+	stSessionRecvBuff bufferedSessionRecvBuffs;
+	bufferedSessionRecvBuffs.sessionID = sessionID;
+	
+	while (!bufferedQueue.empty()) {
+		JBuffer recvBuff = bufferedQueue.front(); 
+		bufferedQueue.pop();
+
+		std::shared_ptr<JBuffer> recvData = make_shared<JBuffer>(recvBuff.GetUseSize());
+		UINT dirDeqSize = recvBuff.GetDirectDequeueSize();
+		if (dirDeqSize >= recvBuff.GetUseSize()) {
+			recvData->Enqueue(recvBuff.GetDequeueBufferPtr(), recvBuff.GetUseSize());
+		}
+		else {
+			recvData->Enqueue(recvBuff.GetDequeueBufferPtr(), dirDeqSize);
+			recvData->Enqueue(recvBuff.GetBeginBufferPtr(), recvBuff.GetUseSize() - dirDeqSize);
+		}
+
+		bufferedSessionRecvBuffs.recvDataBuffered.push(recvData );
+	}
+	m_GroupThreads[groupID]->PushRecvBuff(bufferedSessionRecvBuffs);
 }
-
-
+#else
 void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 {
 	AcquireSRWLockShared(&m_SessionGroupIDSrwLock);
@@ -66,6 +94,21 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 	UINT16 groupID = m_SessionGroupID[sessionID];
 	ReleaseSRWLockShared(&m_SessionGroupIDSrwLock);
 
+#if defined	(POLLING_LOCKFREE_QUEUE)
+	//JBuffer recvData(recvBuff.GetUseSize());
+	JBuffer* recvData = new JBuffer(recvBuff.GetUseSize());
+	UINT dirDeqSize = recvBuff.GetDirectDequeueSize();
+	if (dirDeqSize >= recvBuff.GetUseSize()) {
+		recvData->Enqueue(recvBuff.GetDequeueBufferPtr(), recvBuff.GetUseSize());
+	}
+	else {
+		recvData->Enqueue(recvBuff.GetDequeueBufferPtr(), dirDeqSize);
+		recvData->Enqueue(recvBuff.GetBeginBufferPtr(), recvBuff.GetUseSize() - dirDeqSize);
+	}
+
+	m_GroupThreads[groupID]->PushRecvBuff(sessionID, recvData);
+
+#else
 	std::shared_ptr<JBuffer> recvData = make_shared<JBuffer>(recvBuff.GetUseSize());
 	UINT dirDeqSize = recvBuff.GetDirectDequeueSize();
 	if (dirDeqSize >= recvBuff.GetUseSize()) {
@@ -78,12 +121,78 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JBuffer& recvBuff)
 
 	stSessionRecvBuff sessionRecvBuff{ sessionID, recvData };
 	m_GroupThreads[groupID]->PushRecvBuff(sessionRecvBuff);
+#endif
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#if defined(ON_RECV_BUFFERING)
+void CLanGroupThread::PushRecvBuff(stSessionRecvBuff& bufferedRecvData) {
+#if defined(POLLING_SESSION_MESSAGE_QUEUE)
+	bool isPresent = true;
+	AcquireSRWLockShared(&m_SessionMsgQueueSRWLock);
+	SessionQueueMap::iterator iter = m_SessionMsgQueueMap.find(bufferedRecvData.sessionID);
+	if (iter == m_SessionMsgQueueMap.end()) {
+		isPresent = false;
+	}
+	ReleaseSRWLockShared(&m_SessionMsgQueueSRWLock);
+
+	if (!isPresent) {
+		AcquireSRWLockExclusive(&m_SessionMsgQueueSRWLock);
+		if (m_SessionMsgQueueMap.find(bufferedRecvData.sessionID) == m_SessionMsgQueueMap.end()) {
+			CRITICAL_SECTION* lockPtr = new CRITICAL_SECTION();
+			InitializeCriticalSection(lockPtr);
+			std::pair<SessionQueueMap::iterator, bool> ret = m_SessionMsgQueueMap.insert({ bufferedRecvData.sessionID, std::make_pair(std::queue<shared_ptr<JBuffer>>(), lockPtr) });
+			if (!ret.second) {
+				DebugBreak();
+			}
+			iter = ret.first;
+		}
+		ReleaseSRWLockExclusive(&m_SessionMsgQueueSRWLock);
+	}
+
+	std::queue<std::shared_ptr<JBuffer>>& recvQueue = iter->second.first;
+	CRITICAL_SECTION* recvQueueLock = iter->second.second;
+	EnterCriticalSection(recvQueueLock);
+	while (!bufferedRecvData.recvDataBuffered.empty()) {
+		recvQueue.push(bufferedRecvData.recvDataBuffered.front());
+		bufferedRecvData.recvDataBuffered.pop();
+	}
+	LeaveCriticalSection(recvQueueLock);
+#endif
+}
+#else
 void CLanGroupThread::PushRecvBuff(stSessionRecvBuff& recvBuff) {
-#if !defined(POLLING_SESSION_MESSAGE_QUEUE)
+#if defined(POLLING_SESSION_MESSAGE_QUEUE)
+	bool isPresent = true;
+	AcquireSRWLockShared(&m_SessionMsgQueueSRWLock);
+	SessionQueueMap::iterator iter = m_SessionMsgQueueMap.find(recvBuff.sessionID);
+	if (iter == m_SessionMsgQueueMap.end()) {
+		isPresent = false;
+	}
+	ReleaseSRWLockShared(&m_SessionMsgQueueSRWLock);
+
+	if (!isPresent) {
+		AcquireSRWLockExclusive(&m_SessionMsgQueueSRWLock);
+		if (m_SessionMsgQueueMap.find(recvBuff.sessionID) == m_SessionMsgQueueMap.end()) {
+			CRITICAL_SECTION* lockPtr = new CRITICAL_SECTION();
+			InitializeCriticalSection(lockPtr);
+			std::pair<SessionQueueMap::iterator, bool> ret = m_SessionMsgQueueMap.insert({ recvBuff.sessionID, std::make_pair(std::queue<shared_ptr<JBuffer>>(), lockPtr) });
+			if (!ret.second) {
+				DebugBreak();
+			}
+			iter = ret.first;
+		}
+		ReleaseSRWLockExclusive(&m_SessionMsgQueueSRWLock);
+	}
+
+	std::queue<std::shared_ptr<JBuffer>>& recvQueue = iter->second.first;
+	CRITICAL_SECTION* recvQueueLock = iter->second.second;
+	EnterCriticalSection(recvQueueLock);
+	recvQueue.push(recvBuff.recvData);
+	LeaveCriticalSection(recvQueueLock);
+#elif defined(SETEVENT_RECEIVE_EVENT) || (POLLING_RECEIVE_EVENT)
 #if defined(RECV_BUFF_QUEUE)
 	m_RecvQueueMtx.lock();
 	m_RecvQueue.push(recvBuff);
@@ -146,42 +255,19 @@ void CLanGroupThread::PushRecvBuff(stSessionRecvBuff& recvBuff) {
 #if defined(SETEVENT_RECEIVE_EVENT)
 	SetEvent(m_RecvEvent);
 #endif
-
 #endif
-#else 	
-	bool isPresent = true;
-	AcquireSRWLockShared(&m_SessionMsgQueueSRWLock);
-	SessionQueueMap::iterator iter = m_SessionMsgQueueMap.find(recvBuff.sessionID);
-	if (iter == m_SessionMsgQueueMap.end()) {
-		isPresent = false;
-	}
-	ReleaseSRWLockShared(&m_SessionMsgQueueSRWLock);
-
-	if (!isPresent) {
-		AcquireSRWLockExclusive(&m_SessionMsgQueueSRWLock);
-		if (m_SessionMsgQueueMap.find(recvBuff.sessionID) == m_SessionMsgQueueMap.end()) {
-			CRITICAL_SECTION* lockPtr = new CRITICAL_SECTION();
-			InitializeCriticalSection(lockPtr);
-			std::pair<SessionQueueMap::iterator, bool> ret = m_SessionMsgQueueMap.insert({ recvBuff.sessionID, std::make_pair(std::queue<shared_ptr<JBuffer>>(), lockPtr) });
-			if (!ret.second) {
-				DebugBreak();
-			}
-			iter = ret.first;
-		}
-		ReleaseSRWLockExclusive(&m_SessionMsgQueueSRWLock);
-	}
-
-	std::queue<std::shared_ptr<JBuffer>>& recvQueue = iter->second.first;
-	CRITICAL_SECTION* recvQueueLock = iter->second.second;
-	EnterCriticalSection(recvQueueLock);
-	recvQueue.push(recvBuff.recvData);
-	LeaveCriticalSection(recvQueueLock);
 #endif
 }
+void CLanGroupThread::PushRecvBuff(SessionID sessionID, JBuffer* recvData)
+{
+	m_LockFreeMessageQueue.Enqueue({ sessionID, recvData });
+}
+#endif
 
 UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 {
 	CLanGroupThread* groupthread = (CLanGroupThread*)arg;
+	groupthread->m_ClanGroupServer->m_ActiveGroupThread++;
 
 	groupthread->OnStart();
 
@@ -280,6 +366,9 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 			SessionID sessionID = iter.first;
 			std::queue<std::shared_ptr<JBuffer>>& recvQueue = iter.second.first;
 			CRITICAL_SECTION* recvQueueLock = iter.second.second;
+			if (recvQueue.empty()) {
+				continue;
+			}
 
 			EnterCriticalSection(recvQueueLock);
 			while (!recvQueue.empty()) {
@@ -287,10 +376,38 @@ UINT __stdcall CLanGroupThread::SessionGroupThreadFunc(void* arg)
 				recvQueue.pop();
 			}
 			LeaveCriticalSection(recvQueueLock);
+			//if (TryEnterCriticalSection(recvQueueLock)) {
+			//	while (!recvQueue.empty()) {
+			//		groupthread->OnMessage(sessionID, *recvQueue.front());
+			//		recvQueue.pop();
+			//	}
+			//	LeaveCriticalSection(recvQueueLock);
+			//}
 		}
 		ReleaseSRWLockShared(&groupthread->m_SessionMsgQueueSRWLock);
 	}
+#elif defined(POLLING_LOCKFREE_QUEUE)
+	while (!groupthread->m_SessionGroupThreadStopFlag) {
+		static UINT16 dequeueFailCnt = 0;
+
+		std::pair<SessionID, JBuffer*> recvBuff;
+		if (groupthread->m_LockFreeMessageQueue.Dequeue(recvBuff)) {
+			JBuffer* recvData = recvBuff.second;
+			groupthread->OnMessage(recvBuff.first, *recvData);
+			delete recvData;
+
+			if (dequeueFailCnt > 0) {
+				dequeueFailCnt--;
+			}
+		}
+		else {
+			dequeueFailCnt++;
+		}
+		groupthread->SetServerCnt(dequeueFailCnt);
+	}
 #endif
+
+	groupthread->m_ClanGroupServer->m_ActiveGroupThread--;
 	return 0;
 }
 
@@ -315,7 +432,7 @@ bool CLanGroupThread::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {
 void CLanGroupThread::ForwardSessionGroup(SessionID sessionID, GroupID to) {
 	m_ClanGroupServer->ForwardSessionGroup(sessionID, m_GroupID, to);
 }
-void CLanGroupThread::PostMsgToThreadGroup(GroupID groupID, JBuffer& msg) {
-	m_ClanGroupServer->PostMsgToThreadGroup(groupID, msg);
-}
+//void CLanGroupThread::PostMsgToThreadGroup(GroupID groupID, JBuffer& msg) {
+//	m_ClanGroupServer->PostMsgToThreadGroup(groupID, msg);
+//}
 
