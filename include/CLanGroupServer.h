@@ -245,6 +245,9 @@ protected:
 	inline void IncrementRecvTransaction(LONG cnt = 1) {
 		m_ClanGroupServer->IncrementRecvTransaction(cnt);
 	}
+	inline void IncrementRecvTransactionNoGuard(LONG cnt = 1) {
+		m_ClanGroupServer->IncrementRecvTransactionNoGuard(cnt);
+	}
 #endif
 
 	inline void IncrementServerCnt() {

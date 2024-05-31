@@ -181,6 +181,10 @@ public:
 		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], cnt);
 		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], cnt);
 	}
+	inline void IncrementRecvTransactionNoGuard(LONG cnt = 1) {
+		m_CalcTpsItems[RECV_TRANSACTION] += cnt;
+		m_TotalTransaction[RECV_TRANSACTION] += cnt;
+	}
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
