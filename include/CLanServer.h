@@ -185,6 +185,14 @@ public:
 		m_CalcTpsItems[RECV_TRANSACTION] += cnt;
 		m_TotalTransaction[RECV_TRANSACTION] += cnt;
 	}
+	inline void IncrementSendTransaction(LONG cnt = 1) {
+		InterlockedAdd(&m_CalcTpsItems[SEND_TRANSACTION], cnt);
+		InterlockedAdd(&m_TotalTransaction[SEND_TRANSACTION], cnt);
+	}
+	inline void IncrementSendTransactionNoGuard(LONG cnt = 1) {
+		m_CalcTpsItems[SEND_TRANSACTION] += cnt;
+		m_TotalTransaction[SEND_TRANSACTION] += cnt;
+	}
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
@@ -331,7 +339,7 @@ public:
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr);
+	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false);
 #else
 	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr);
 #endif
@@ -394,7 +402,7 @@ protected:
 #endif
 	virtual void OnClientLeave(UINT64 sessionID) = 0;
 #if defined(ON_RECV_BUFFERING)
-	virtual void OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue) = 0;
+	virtual void OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue, size_t recvDataLen) = 0;
 #else
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) = 0;
 #endif
@@ -409,9 +417,13 @@ private:
 	// Process Recv/Send message, Encode, Decode
 	/////////////////////////////////////////////////////////////////
 	bool ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer);
+public:
 	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
 	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
 	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer& ringPayloads);
+	inline BYTE GetRandomKey() {
+		return rand() % UINT8_MAX;	// 0b0000'0000 ~ 0b0111'1110 (0b1111'1111은 디코딩이 이루어지지 않은 페이로드 식별 값)
+	}
 	
 	/////////////////////////////////
 	// 모니터링 항목

@@ -196,16 +196,30 @@ void CLanServer::Disconnect(uint64 sessionID)
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr) {	// sendDataPtr의 deqOffset은 0으로 가정
+bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded) {	// sendDataPtr의 deqOffset은 0으로 가정
 
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
 
-		// 인코딩 수행
-		stMSG_HDR* hdr = (stMSG_HDR*)sendDataPtr->GetDequeueBufferPtr();
-		if (hdr->randKey == (BYTE)-1) {
-			hdr->randKey = rand() % UINT8_MAX;
-			Encode(hdr->randKey, hdr->len, hdr->checkSum, sendDataPtr->GetBufferPtr(sizeof(stMSG_HDR)));
+		if (!encoded) {
+			// 인코딩 수행
+			if (sendDataPtr->GetUseSize() < sizeof(stMSG_HDR)) {
+				DebugBreak();
+				return false;
+			}
+			else {
+				UINT offset = 0;
+				stMSG_HDR* hdr;// = (stMSG_HDR*)sendDataPtr->GetDequeueBufferPtr();
+				while (offset < sendDataPtr->GetUseSize()) {
+					hdr = (stMSG_HDR*)sendDataPtr->GetBufferPtr(offset);
+					offset += sizeof(stMSG_HDR);
+					if (hdr->randKey == (BYTE)-1) {
+						hdr->randKey = GetRandomKey();
+						Encode(hdr->randKey, hdr->len, hdr->checkSum, sendDataPtr->GetBufferPtr(offset));
+					}
+					offset += hdr->len;
+				}
+			}
 		}
 
 		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
@@ -471,9 +485,6 @@ void CLanServer::SendPost(uint64 sessionID)
 			wsasendLog.sessionIndex = session->Id.idx;
 			wsasendLog.iocnt = session->sessionRef.ioCnt;
 			wsasendLog.releaseFlag = session->sessionRef.releaseFlag;
-#endif
-#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-			InterlockedAdd(&m_TotalTransaction[SEND_REQ_TRANSACTION], sendLimit);
 #endif
 
 			if (WSASend(session->sock, wsabuffs, sendLimit, NULL, 0, &session->sendOverlapped, NULL) == SOCKET_ERROR) {
@@ -955,10 +966,10 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					sendLog.iocnt = session->sessionRef.ioCnt;
 					sendLog.releaseFlag = session->sessionRef.releaseFlag;
 #endif
-#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TRANSACTION], session->sendOverlapped.Offset);
-					InterlockedAdd(&clanserver->m_TotalTransaction[SEND_TRANSACTION], session->sendOverlapped.Offset);
-#endif
+//#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+//					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TRANSACTION], session->sendOverlapped.Offset);
+//					InterlockedAdd(&clanserver->m_TotalTransaction[SEND_TRANSACTION], session->sendOverlapped.Offset);
+//#endif
 					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
 					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
@@ -1122,6 +1133,7 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 {
 #if defined(ON_RECV_BUFFERING)
 	std::queue<JBuffer> bufferedQueue;
+	size_t recvDataLen = 0;
 	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
 		//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
 		// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
@@ -1144,10 +1156,10 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 
 		JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
 		bufferedQueue.push(recvBuff);
-
+		recvDataLen += hdr.len;
 		recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
 	}
-	OnRecv(sessionID, bufferedQueue);
+	OnRecv(sessionID, bufferedQueue, recvDataLen);
 #else
 	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
 		//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
@@ -1176,6 +1188,10 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 	}
 #endif
 
+	if (recvRingBuffer.GetUseSize() == 0) {
+		recvRingBuffer.ClearBuffer();
+	}
+
 	return true;
 }
 
@@ -1190,8 +1206,10 @@ void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* p
 	checkSum = Eb;
 
 	for (USHORT i = 1; i <= payloadLen; i++) {
-		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
-		BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		//BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
+		//BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + i + 1);
+		BYTE En = Pn ^ (Eb + dfPACKET_KEY + i + 1);
 
 		payloads[i - 1] = En;
 
@@ -1208,8 +1226,10 @@ bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* pa
 	BYTE payloadSumCmp = 0;
 
 	for (USHORT i = 1; i <= payloadLen; i++) {
-		Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
-		Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+		//Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		//Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+		Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + i + 1);
+		Dn = Pn ^ (Pb + randKey + i + 1);
 
 		Pb = Pn;
 		Eb = payloads[i - 1];
@@ -1251,8 +1271,10 @@ bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer&
 		//}
 		for (USHORT i = 1; i <= payloadLen; i++, offset++) {
 			offset = offset % (ringPayloads.GetBufferSize() + 1);
-			Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
-			Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+			//Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+			//Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+			Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + i + 1);
+			Dn = Pn ^ (Pb + randKey + i + 1);
 
 			Pb = Pn;
 			Eb = bytepayloads[offset];
