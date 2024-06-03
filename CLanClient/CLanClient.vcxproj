@@ -19,18 +19,16 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CLanServer.cpp" />
+    <ClInclude Include="CLanClient.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\include\CLanServer.h" />
-    <ClInclude Include="..\include\CLanServerConfig.h" />
-    <ClInclude Include="..\include\CommonProtocol.h" />
+    <ClCompile Include="CLanClient.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{95104af0-56a3-4997-a99b-4473f0a0a357}</ProjectGuid>
-    <RootNamespace>CLanServer</RootNamespace>
+    <ProjectGuid>{4f91fab4-1e86-414c-a1d1-7cbbce2b204d}</ProjectGuid>
+    <RootNamespace>CLanClient</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -79,14 +77,12 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
     <IncludePath>$(SolutionDir)include;$(IncludePath)</IncludePath>
-    <ExternalIncludePath>$(SolutionDir)..\0. ServerNetwork\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\MemoryPool\include</ExternalIncludePath>
+    <ExternalIncludePath>$(SolutionDir)..\0. ServerNetwork\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(ExternalIncludePath)</ExternalIncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
     <IncludePath>$(SolutionDir)include;$(IncludePath)</IncludePath>
-    <ExternalIncludePath>$(SolutionDir)..\0. ServerNetwork\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\MemoryPool\include</ExternalIncludePath>
+    <ExternalIncludePath>$(SolutionDir)..\0. ServerNetwork\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(ExternalIncludePath)</ExternalIncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -147,7 +143,6 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <Optimization>Disabled</Optimization>
     </ClCompile>
     <Link>
       <SubSystem>
