@@ -19,10 +19,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="CLanClient.h" />
+    <ClCompile Include="CLanClient.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CLanClient.cpp" />
+    <ClInclude Include="..\include\CLanClient.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
