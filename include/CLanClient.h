@@ -4,6 +4,52 @@
 
 class CLanClient : public CLanServer
 {
+public:
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	//CLanServer(const char* serverIP, uint16 serverPort,
+	//	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+	//	bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
+	//	size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+	//	uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+	//	bool beNagle = true
+	//);
+	CLanClient(const char* serverIP, uint16 serverPort,
+		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
+		size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+		bool beNagle = true
+	)
+		: CLanServer(serverIP, serverPort,numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
+			tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
+			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+			sessionSendBuffSize, sessionRecvBuffSize,
+			beNagle)
+	{}
+#else
+	//CLanServer(const char* serverIP, UINT16 serverPort,
+	//	DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
+	//	uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+	//	bool beNagle = true
+	//);
+	CLanClient(const char* serverIP, UINT16 serverPort,
+		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
+		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+		bool beNagle = true
+	)
+		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
+			sessionSendBuffSize, sessionRecvBuffSize,
+			beNagle)
+	{}
+#endif
+
+	bool Start() {
+		return CLanServer::Start();
+	}
+	void Stop() {
+		CLanServer::Stop();
+	}
+
 private:
 	SOCKET		m_CLanClientSock;
 	JBuffer		m_RecvBufferFromCLanServer;
@@ -25,8 +71,8 @@ private:
 	HANDLE		m_Events[m_EventCnt];
 
 protected:
-	bool Connect(const CHAR* clanServerIP, USHORT clanserverPort, DWORD numOfIocpConcurrentThrd);		//	바인딩 IP, 서버IP / 워커스레드 수 / 나글옵션
-	bool Disconnect();							
+	bool ConnectLanServer(const CHAR* clanServerIP, USHORT clanserverPort, DWORD numOfIocpConcurrentThrd);		//	바인딩 IP, 서버IP / 워커스레드 수 / 나글옵션
+	bool DisconnectLanServer();							
 	
 	bool SendPacketToCLanServer(JBuffer* sendPacket, bool encoded = false);
 	void SendPostToCLanServer();

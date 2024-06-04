@@ -1,6 +1,6 @@
 #include "CLanClient.h"
 
-bool CLanClient::Connect(const CHAR* clanServerIP, USHORT clanserverPort, DWORD numOfIocpConcurrentThrd)
+bool CLanClient::ConnectLanServer(const CHAR* clanServerIP, USHORT clanserverPort, DWORD numOfIocpConcurrentThrd)
 {
 	m_CLanClientSock = CreateWindowSocket_IPv4(true);
 	SOCKADDR_IN serverAddr = CreateDestinationADDR(clanServerIP, clanserverPort);
@@ -38,7 +38,7 @@ bool CLanClient::Connect(const CHAR* clanServerIP, USHORT clanserverPort, DWORD 
 	return true;
 }
 
-bool CLanClient::Disconnect()
+bool CLanClient::DisconnectLanServer()
 {
 	SetEvent(m_Events[enThreadExit]);
 
@@ -76,16 +76,15 @@ bool CLanClient::SendPacketToCLanServer(JBuffer* sendPacket, bool encoded)
 
 	{
 		std::lock_guard<std::mutex> lockGuard(m_SendBufferMtx);
-		if (m_SendBufferToCLanServer.GetFreeSize() < sendPacket->GetUseSize()) {
-			return false;
+		if (m_SendBufferToCLanServer.GetFreeSize() < sizeof(UINT_PTR)) {
+			DebugBreak();
 		}
 		else {
-			UINT enqSize = m_SendBufferToCLanServer.Enqueue(sendPacket->GetDequeueBufferPtr(), sendPacket->GetUseSize());
-			if (enqSize < sendPacket->GetUseSize()) {
-				DebugBreak();
-			}
+			m_SendBufferToCLanServer.Enqueue((BYTE*)&sendPacket, sizeof(UINT_PTR));
 		}
 	}
+
+	SendPostToCLanServer();
 
 	return true;
 }
@@ -93,27 +92,49 @@ bool CLanClient::SendPacketToCLanServer(JBuffer* sendPacket, bool encoded)
 void CLanClient::SendPostToCLanServer()
 {
 	if (InterlockedExchange(&m_SendFlag, 1) == 0) {
-		WSABUF wsabuffs[2];
-		DWORD bufCnt;
-		if (m_SendBufferToCLanServer.GetDirectDequeueSize() < m_SendBufferToCLanServer.GetUseSize()) {
-			wsabuffs[0].buf = (char*)m_SendBufferToCLanServer.GetDequeueBufferPtr();
-			wsabuffs[0].len = m_SendBufferToCLanServer.GetDirectDequeueSize();
-			wsabuffs[1].buf = (char*)m_SendBufferToCLanServer.GetBeginBufferPtr();
-			wsabuffs[1].len = m_SendBufferToCLanServer.GetUseSize() - m_SendBufferToCLanServer.GetDirectDequeueSize();
-			bufCnt = 2;
-		}
-		else {
-			wsabuffs[0].buf = (char*)m_SendBufferToCLanServer.GetDequeueBufferPtr();
-			wsabuffs[0].len = m_SendBufferToCLanServer.GetUseSize();
-			bufCnt = 1;
-		}
+		//WSABUF wsabuffs[2];
+		//DWORD bufCnt;
+		//if (m_SendBufferToCLanServer.GetDirectDequeueSize() < m_SendBufferToCLanServer.GetUseSize()) {
+		//	wsabuffs[0].buf = (char*)m_SendBufferToCLanServer.GetDequeueBufferPtr();
+		//	wsabuffs[0].len = m_SendBufferToCLanServer.GetDirectDequeueSize();
+		//	wsabuffs[1].buf = (char*)m_SendBufferToCLanServer.GetBeginBufferPtr();
+		//	wsabuffs[1].len = m_SendBufferToCLanServer.GetUseSize() - m_SendBufferToCLanServer.GetDirectDequeueSize();
+		//	bufCnt = 2;
+		//}
+		//else {
+		//	wsabuffs[0].buf = (char*)m_SendBufferToCLanServer.GetDequeueBufferPtr();
+		//	wsabuffs[0].len = m_SendBufferToCLanServer.GetUseSize();
+		//	bufCnt = 1;
+		//}
 
-		memset(&m_SendOverlapped, 0, sizeof(WSAOVERLAPPED) - sizeof(WSAOVERLAPPED::hEvent));
-		if (WSASend(m_CLanClientSock, wsabuffs, bufCnt, NULL, 0, &m_SendOverlapped, NULL) == SOCKET_ERROR) {
-			int errcode = WSAGetLastError();
-			if (errcode != WSA_IO_PENDING) {
-				// 연결 종료
-				Disconnect();
+		{
+			std::lock_guard<std::mutex> lockGuard(m_SendBufferMtx);
+
+			DWORD numOfMessages = m_SendBufferToCLanServer.GetUseSize() / sizeof(UINT_PTR);
+			WSABUF wsabuffs[WSABUF_ARRAY_DEFAULT_SIZE];
+
+			if (numOfMessages > 0) {
+				int sendLimit = min(numOfMessages, WSABUF_ARRAY_DEFAULT_SIZE);
+				for (int idx = 0; idx < sendLimit; idx++) {
+					JBuffer* msgPtr;
+					m_SendBufferToCLanServer.Peek(sizeof(UINT_PTR) * idx, (BYTE*)&msgPtr, sizeof(UINT_PTR));
+					wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
+					wsabuffs[idx].len = msgPtr->GetUseSize();
+					if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
+						DebugBreak();
+					}
+				}
+				
+				memset(&m_SendOverlapped, 0, sizeof(WSAOVERLAPPED) - sizeof(WSAOVERLAPPED::hEvent));
+				m_SendOverlapped.Offset = sendLimit;
+
+				if (WSASend(m_CLanClientSock, wsabuffs, sendLimit, NULL, 0, &m_SendOverlapped, NULL) == SOCKET_ERROR) {
+					int errcode = WSAGetLastError();
+					if (errcode != WSA_IO_PENDING) {
+						// 연결 종료
+						DisconnectLanServer();
+					}
+				}
 			}
 		}
 	}
@@ -122,6 +143,8 @@ void CLanClient::SendPostToCLanServer()
 UINT __stdcall CLanClient::CLanNetworkFunc(void* arg)
 {
 	CLanClient* clanclient = (CLanClient*)arg;
+	clanclient->m_SerialBuffPoolMgr.AllocTlsMemPool();
+
 	int retval;
 	while (true) {
 		retval = WaitForMultipleObjects(m_EventCnt, clanclient->m_Events, FALSE, INFINITE);
@@ -137,6 +160,8 @@ UINT __stdcall CLanClient::CLanNetworkFunc(void* arg)
 			GetOverlappedResult((HANDLE)clanclient->m_CLanClientSock, (LPOVERLAPPED)&clanclient->m_RecvOverlapped, &recvBytes, FALSE);
 			if (recvBytes == 0) {
 				// 상대측 연결 종료
+				clanclient->OnLeaveServer();
+				break;
 			}
 			else {
 				// 수신 완료
@@ -185,14 +210,26 @@ UINT __stdcall CLanClient::CLanNetworkFunc(void* arg)
 			DWORD sendBytes;
 			GetOverlappedResult((HANDLE)clanclient->m_CLanClientSock, (LPOVERLAPPED)&clanclient->m_SendOverlapped, &sendBytes, FALSE);
 			if (sendBytes == 0) {
-
+				clanclient->OnLeaveServer();
+				break;
 			}
 			else {
 				// 송신 완료
-				clanclient->m_SendBufferToCLanServer.DirectMoveDequeueOffset(sendBytes);
+				InterlockedExchange(&clanclient->m_SendFlag, 0);
+				{
+					std::lock_guard<std::mutex> lockGuard(clanclient->m_SendBufferMtx);
+
+					for (int i = 0; i < clanclient->m_SendOverlapped.Offset; i++) {
+						JBuffer* sendBuff;
+						clanclient->m_SendBufferToCLanServer >> sendBuff;
+						clanclient->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
+					}
+				}
+
 				if (clanclient->m_SendBufferToCLanServer.GetUseSize() > 0) {
 					clanclient->SendPostToCLanServer();
 				}
+
 			}
 		}
 			break;
