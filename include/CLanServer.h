@@ -246,6 +246,10 @@ public:
 	inline void AddRefSerialBuff(JBuffer* buff, const std::string& log) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1, log);
 	}
+
+	inline size_t GetAllocMemPoolUsageSize() {
+		return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
+	}
 #endif
 
 	/////////////////////////////////
