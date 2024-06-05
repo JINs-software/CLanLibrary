@@ -227,11 +227,6 @@ public:
 		msg->ClearBuffer();
 		return msg;
 	}
-	inline JBuffer* AllocSerialBuff(const std::string& log) {
-		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
-		msg->ClearBuffer();
-		return msg;
-	}
 	inline JBuffer* AllocSerialSendBuff(USHORT length) {
 		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
 		msg->ClearBuffer();
@@ -241,6 +236,19 @@ public:
 		hdr->len = length;
 		hdr->randKey = (BYTE)(-1);	// Encode 전 송신 직렬화 버퍼 식별
 
+		return msg;
+	}
+	inline void FreeSerialBuff(JBuffer* buff) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff);
+	}
+	inline void AddRefSerialBuff(JBuffer* buff) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1);
+	}
+
+#if defined(ALLOC_MEM_LOG)
+	inline JBuffer* AllocSerialBuff(const std::string& log) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
+		msg->ClearBuffer();
 		return msg;
 	}
 	inline JBuffer* AllocSerialSendBuff(USHORT length, const std::string& log) {
@@ -254,18 +262,14 @@ public:
 
 		return msg;
 	}
-	inline void FreeSerialBuff(JBuffer* buff) {
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff);
-	}
 	inline void FreeSerialBuff(JBuffer* buff, const std::string& log) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff, log);
 	}
-	inline void AddRefSerialBuff(JBuffer* buff) {
-		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1);
-	}
+	
 	inline void AddRefSerialBuff(JBuffer* buff, const std::string& log) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1, log);
 	}
+#endif
 
 	inline size_t GetAllocMemPoolUsageSize() {
 		return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
