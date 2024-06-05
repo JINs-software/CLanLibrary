@@ -17,13 +17,21 @@ public:
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
 		size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+#if defined(LOCKFREE_SEND_QUEUE)
+		uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+#else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+#endif
 		bool beNagle = true
 	)
 		: CLanServer(serverIP, serverPort,numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
 			tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+#if defined(LOCKFREE_SEND_QUEUE)
+			sessionRecvBuffSize,
+#else
 			sessionSendBuffSize, sessionRecvBuffSize,
+#endif
 			beNagle)
 	{}
 #else

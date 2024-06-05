@@ -30,7 +30,14 @@ class CLanServer
 		WSAOVERLAPPED sendOverlapped;
 		JBuffer recvRingBuffer;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+
+#if defined(LOCKFREE_SEND_QUEUE)
+		LockFreeQueue<JBuffer*>	sendBufferQueue;
+		std::queue<JBuffer*>	sendPostedQueue;
+#else
 		JBuffer sendRingBuffer;
+#endif
+
 #else
 		//std::queue<std::shared_ptr<JBuffer>> sendQueueBuffer;
 		std::vector<std::shared_ptr<JBuffer>> sendBufferVector;
@@ -48,7 +55,11 @@ class CLanServer
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE)
+#else
 		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
+#endif
 #else
 		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE)
 #endif
@@ -88,10 +99,19 @@ class CLanServer
 			// => 채팅 서버 테스트 용, 채팅 서버에서는 더미 클라이언트의 송신->수신->종료 순
 			recvRingBuffer.ClearBuffer();
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+			if (sendBufferQueue.GetSize() > 0) {
+				DebugBreak();
+			}
+			if (!sendPostedQueue.empty()) {
+				DebugBreak();
+			}
+#else
 			if (sendRingBuffer.GetUseSize() > 0) {
 				DebugBreak();
 			}
 			sendRingBuffer.ClearBuffer();
+#endif
 #else
 			if (sendBufferVector.size() > 0) {
 				DebugBreak();
@@ -319,13 +339,21 @@ public:
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections, 
 		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
 		size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+#if defined(LOCKFREE_SEND_QUEUE)
+		uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+#else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+#endif
 		bool beNagle = true
 	);
 #else
 	CLanServer(const char* serverIP, UINT16 serverPort,
 		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
+#if defined(LOCKFREE_SEND_QUEUE)
+		uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+#else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
+#endif
 		bool beNagle = true
 	);
 #endif
@@ -400,7 +428,11 @@ protected:
 	virtual bool OnConnectionRequest(/*IP, Port*/);
 	virtual void OnClientJoin(UINT64 sessionID) = 0;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+	virtual void OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, std::queue<JBuffer*>& sendPostedQueue);
+#else
 	virtual void OnDeleteSendPacket(UINT64 sessionID, JBuffer& sendRingBuffer);
+#endif
 #else
 	virtual void OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_ptr<JBuffer>>& sendBufferVec);
 #endif

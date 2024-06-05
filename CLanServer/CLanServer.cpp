@@ -9,7 +9,11 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 	bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
 	size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultCapacity,
+#if defined(LOCKFREE_SEND_QUEUE)
+	uint32 sessionRecvBuffSize,
+#else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
+#endif
 	bool beNagle
 )
 	: m_MaxOfSessions(maxOfConnections), m_Incremental(0),
@@ -18,7 +22,11 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 #else
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+#if defined(LOCKFREE_SEND_QUEUE)
+	uint32 sessionRecvBuffSize,
+#else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
+#endif
 	bool beNagle
 )
 	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false)
@@ -222,6 +230,9 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded
 			}
 		}
 
+#if defined(LOCKFREE_SEND_QUEUE)
+		session->sendBufferQueue.Enqueue(sendDataPtr);
+#else
 		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 
 		if (session->sendRingBuffer.GetFreeSize() < sizeof(UINT_PTR)) {
@@ -245,6 +256,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded
 		}
 
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+#endif
 
 		SendPost(sessionID);
 	}
@@ -444,14 +456,20 @@ void CLanServer::SendPost(uint64 sessionID)
 	if (InterlockedExchange(&session->sendFlag, 1) == 0) {
 		session->clearSendOverlapped();	// 송신용 overlapped 구조체 초기화
 
-
-		AcquireSRWLockShared(&session->sendBuffSRWLock);
+		
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-		DWORD numOfMessages = session->sendRingBuffer.GetUseSize() / sizeof(UINT_PTR);
+#if defined(LOCKFREE_SEND_QUEUE)
+		DWORD numOfMessages = session->sendBufferQueue.GetSize();
 #else
-		DWORD numOfMessages = session->sendBufferVector.size();
-#endif
+		AcquireSRWLockShared(&session->sendBuffSRWLock);
+		DWORD numOfMessages = session->sendRingBuffer.GetUseSize() / sizeof(UINT_PTR);
 		ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
+#else
+		AcquireSRWLockShared(&session->sendBuffSRWLock);
+		DWORD numOfMessages = session->sendBufferVector.size();
+		ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
 
 		WSABUF wsabuffs[WSABUF_ARRAY_DEFAULT_SIZE];
 
@@ -462,12 +480,23 @@ void CLanServer::SendPost(uint64 sessionID)
 			for (int idx = 0; idx < sendLimit; idx++) {
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 				JBuffer* msgPtr;
+#if defined(LOCKFREE_SEND_QUEUE)
+				session->sendBufferQueue.Dequeue(msgPtr);
+				session->sendPostedQueue.push(msgPtr);
+				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
+				wsabuffs[idx].len = msgPtr->GetUseSize();
+				if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
+					DebugBreak();
+				}
+				
+#else
 				session->sendRingBuffer.Peek(sizeof(UINT_PTR) * idx, (BYTE*)&msgPtr, sizeof(UINT_PTR));
 				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
 				wsabuffs[idx].len = msgPtr->GetUseSize();
 				if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
 					DebugBreak();
 				}
+#endif
 #else
 				shared_ptr<JBuffer> msgPtr = session->sendBufferVector[idx];
 				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
@@ -683,7 +712,11 @@ bool CLanServer::DeleteSession(uint64 sessionID)
 		closesocket(m_Sessions[allocatedIdx]->sock);
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+		OnDeleteSendPacket(sessionID, delSession->sendBufferQueue, delSession->sendPostedQueue);
+#else
 		OnDeleteSendPacket(sessionID, delSession->sendRingBuffer);
+#endif
 #else
 		OnDeleteSendPacket(sessionID, delSession->sendBufferVector);
 #endif
@@ -966,22 +999,39 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					sendLog.iocnt = session->sessionRef.ioCnt;
 					sendLog.releaseFlag = session->sessionRef.releaseFlag;
 #endif
-//#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-//					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TRANSACTION], session->sendOverlapped.Offset);
-//					InterlockedAdd(&clanserver->m_TotalTransaction[SEND_TRANSACTION], session->sendOverlapped.Offset);
-//#endif
+					//#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+					//					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TRANSACTION], session->sendOverlapped.Offset);
+					//					InterlockedAdd(&clanserver->m_TotalTransaction[SEND_TRANSACTION], session->sendOverlapped.Offset);
+					//#endif
+										//// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
+										//AcquireSRWLockExclusive(&session->sendBuffSRWLock);
+										//for (int i = 0; i < session->sendOverlapped.Offset; i++) {
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
+						JBuffer* sendBuff = session->sendPostedQueue.front();
+						session->sendPostedQueue.pop();
+						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+					}
+#else
 					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
 					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
-#if defined(ALLOC_BY_TLS_MEM_POOL)
 						JBuffer* sendBuff;
 						session->sendRingBuffer >> sendBuff;
 						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
-#else 
-						session->sendBufferVector.erase(session->sendBufferVector.begin());
-#endif
 					}
 					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+#endif
+#else 
+					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
+					AcquireSRWLockExclusive(&session->sendBuffSRWLock);
+					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
+						session->sendBufferVector.erase(session->sendBufferVector.begin());
+					}
+					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+#endif
+					
 
 					// sendFlag Off
 					InterlockedExchange(&session->sendFlag, 0);
@@ -1004,17 +1054,25 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					else {
 						// 세션 연결 유지 -> 추가적인 송신 데이터 존재 시 SendPost 호출
 						bool sendAgainFlag = false;
-						AcquireSRWLockShared(&session->sendBuffSRWLock);
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-						if (session->sendRingBuffer.GetUseSize() >= sizeof(UINT_PTR)) {
+#if defined(LOCKFREE_SEND_QUEUE)
+						if (session->sendBufferQueue.GetSize() > 0) {
 							sendAgainFlag = true;
 						}
 #else
+						AcquireSRWLockShared(&session->sendBuffSRWLock);
+						if (session->sendRingBuffer.GetUseSize() >= sizeof(UINT_PTR)) {
+							sendAgainFlag = true;
+						}
+						ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
+#else
+						AcquireSRWLockShared(&session->sendBuffSRWLock);
 						if (session->sendBufferVector.size() > 0) {
 							sendAgainFlag = true;
 						}
-#endif
 						ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
 
 						if (sendAgainFlag) {
 							clanserver->SendPost(session->uiId);
@@ -1091,6 +1149,21 @@ bool CLanServer::OnConnectionRequest(/*IP, Port*/) {
 
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+void CLanServer::OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, std::queue<JBuffer*>& sendPostedQueue) {
+	// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+	while (sendBufferQueue.GetSize() > 0) {
+		JBuffer* sendPacket;
+		sendBufferQueue.Dequeue(sendPacket);
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+	}
+	while (!sendPostedQueue.empty()) {
+		JBuffer* sendPacket = sendPostedQueue.front();
+		sendPostedQueue.pop();
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+	}
+}
+#else
 void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 {
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
@@ -1111,6 +1184,7 @@ void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 	ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 }
+#endif
 #else
 void CLanServer::OnDeleteSendPacket(UINT64 sessionID, std::vector<std::shared_ptr<JBuffer>>& sendBufferVec)
 {
