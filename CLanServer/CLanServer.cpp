@@ -1011,7 +1011,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
 						JBuffer* sendBuff = session->sendPostedQueue.front();
 						session->sendPostedQueue.pop();
-						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+						//clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
 					}
 #else
 					// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
@@ -1019,7 +1020,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
 						JBuffer* sendBuff;
 						session->sendRingBuffer >> sendBuff;
-						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+						//clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
 					}
 					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
@@ -1155,12 +1157,14 @@ void CLanServer::OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& s
 	while (sendBufferQueue.GetSize() > 0) {
 		JBuffer* sendPacket;
 		sendBufferQueue.Dequeue(sendPacket);
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
 	}
 	while (!sendPostedQueue.empty()) {
 		JBuffer* sendPacket = sendPostedQueue.front();
 		sendPostedQueue.pop();
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
 	}
 }
 #else
@@ -1177,7 +1181,8 @@ void CLanServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
 	while (sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
 		JBuffer* sendPacekt;
 		sendRingBuffer >> sendPacekt;
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
+		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt, to_string(sessionID) + ", FreeMem (DeleteSession)");
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacekt);
 	}
 
 #if defined(SESSION_SENDBUFF_SYNC_TEST)
