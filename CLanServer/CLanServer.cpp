@@ -199,12 +199,12 @@ void CLanServer::Disconnect(uint64 sessionID)
 	if (delSession->sessionRef.ioCnt < 1) {
 		DebugBreak();
 	}
-	PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)delSession, (LPOVERLAPPED)-1);
+	PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)delSession, (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_DISCONNECT);
 }
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded) {	// sendDataPtr의 deqOffset은 0으로 가정
+bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded, bool reqToWorkerTh) {	// sendDataPtr의 deqOffset은 0으로 가정
 
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
@@ -258,7 +258,12 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
-		SendPost(sessionID);
+		if (reqToWorkerTh) {
+			SendPostReq(sessionID);
+		}
+		else {
+			SendPost(sessionID);
+		}
 	}
 	else {
 		return false;
@@ -269,7 +274,7 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded
 	return true;
 }
 #else
-bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr)
+bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr, bool reqToWorkerTh)
 {
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
@@ -280,7 +285,12 @@ bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataP
 
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 
-		SendPost(sessionID);
+		if (reqToWorkerTh) {
+			SendPostReq(sessionID);
+		}
+		else {
+			SendPost(sessionID);
+		}
 	}
 	else {
 		return false;
@@ -445,7 +455,7 @@ void CLanServer::ReturnSession(stCLanSession* session)
 	//     다른 iocp 작업자 스레드에 의해 감소될 상황은 없어보임. 이미 ioCnt == 0인 상황에서 AcquireSession으로 1이 된 상황이기에
 }
 
-void CLanServer::SendPost(uint64 sessionID)
+void CLanServer::SendPost(uint64 sessionID, bool onSendFlag)
 {
 	uint16 idx = (uint16)sessionID;
 	stCLanSession* session = m_Sessions[idx];
@@ -453,7 +463,7 @@ void CLanServer::SendPost(uint64 sessionID)
 		DebugBreak();
 	}
 
-	if (InterlockedExchange(&session->sendFlag, 1) == 0) {
+	if (onSendFlag || InterlockedExchange(&session->sendFlag, 1) == 0) {
 		session->clearSendOverlapped();	// 송신용 overlapped 구조체 초기화
 
 		
@@ -481,8 +491,14 @@ void CLanServer::SendPost(uint64 sessionID)
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 				JBuffer* msgPtr;
 #if defined(LOCKFREE_SEND_QUEUE)
-				session->sendBufferQueue.Dequeue(msgPtr);
-				session->sendPostedQueue.push(msgPtr);
+				//session->sendBufferQueue.Dequeue(msgPtr);
+				// => single reader 보장
+				session->sendBufferQueue.Dequeue(msgPtr, true);
+
+				//session->sendPostedQueue.push(msgPtr);
+				// => push 오버헤드 제거
+				session->sendPostedQueue[idx] = msgPtr;
+
 				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
 				wsabuffs[idx].len = msgPtr->GetUseSize();
 				if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
@@ -587,6 +603,26 @@ void CLanServer::SendPost(uint64 sessionID)
 		}
 	}
 }
+
+void CLanServer::SendPostReq(uint64 sessionID)
+{
+	stSessionID orgID = *((stSessionID*)&sessionID);
+	stCLanSession* session = m_Sessions[orgID.idx];
+
+	// 송신 플래그가 0일때에만 PostQueue
+	// 이 방식으로 Post 호출 절약
+	// 송신 플래그가 1일 때에는 송신 완료 측에서 알아서 송신할 것
+	//if (session->sendFlag == 0) {
+	//	InterlockedIncrement((uint32*)&session->sessionRef);
+	//	PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)session, (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ);
+	//}
+
+	if (InterlockedExchange(&session->sendFlag, 1) == 0) {
+		InterlockedIncrement((uint32*)&session->sessionRef);
+		PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)session, (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ);
+	}
+}
+
 
 CLanServer::stCLanSession* CLanServer::CreateNewSession(SOCKET sock)
 {
@@ -842,7 +878,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 		GetQueuedCompletionStatus(clanserver->m_IOCP, &transferred, (PULONG_PTR)&completionKey, &overlappedPtr, INFINITE);
 		// transffered == 0으로 먼저 분기를 나누지 않은 이유는? transferred와 session(lpCompletionKey)에 대한 초기화를 매번 진행하고 싶지 않아서 
 		if (overlappedPtr != NULL) {
-			if (overlappedPtr == (LPOVERLAPPED)-1) {
+			if (overlappedPtr == (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_DISCONNECT) {
 			
 				// 연결 종료 판단
 				stCLanSession* session = (stCLanSession*)completionKey;
@@ -879,6 +915,28 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					gqcsReturnLog.workDone = true;
 				}
 #endif
+			}
+			else if (overlappedPtr == (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ) {
+				stCLanSession* session = (stCLanSession*)completionKey;
+
+				uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
+				stSessionRef sessionRef = *((stSessionRef*)&uiRef);
+				assert(sessionRef.ioCnt >= 0);
+				if (sessionRef.ioCnt == 0) {
+					// 세션 연결 종료 판단
+					uint64 sessionID = session->uiId;
+#if defined(SESSION_LOG)
+					if (clanserver->DeleteSession(sessionID, "Send Complete, ioCnt == 0")) {
+#else
+					if (clanserver->DeleteSession(sessionID)) {
+#endif
+						clanserver->OnClientLeave(sessionID);
+					}
+				}
+				else {
+					// IOCP 작업자 스레드 측에서 SendPost 호출
+					clanserver->SendPost(session->uiId, true);
+				}
 			}
 			else if (transferred == 0) {
 				// 연결 종료 판단
@@ -1009,9 +1067,12 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
-						JBuffer* sendBuff = session->sendPostedQueue.front();
-						session->sendPostedQueue.pop();
-						//clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff, to_string(session->uiId) + ", FreeMem (송신 완료)");
+						//JBuffer* sendBuff = session->sendPostedQueue.front();
+						//session->sendPostedQueue.pop();
+						// => pop 오버헤드 제거
+						JBuffer* sendBuff = session->sendPostedQueue[i];
+						session->sendPostedQueue[i] = NULL;
+						
 						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
 					}
 #else
@@ -1152,18 +1213,33 @@ bool CLanServer::OnConnectionRequest(/*IP, Port*/) {
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
-void CLanServer::OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, std::queue<JBuffer*>& sendPostedQueue) {
-	// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+//void CLanServer::OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, std::queue<JBuffer*>& sendPostedQueue) {
+//	// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+//	while (sendBufferQueue.GetSize() > 0) {
+//		JBuffer* sendPacket;
+//		sendBufferQueue.Dequeue(sendPacket);
+//		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+//		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
+//	}
+//	while (!sendPostedQueue.empty()) {
+//		JBuffer* sendPacket = sendPostedQueue.front();
+//		sendPostedQueue.pop();
+//		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+//		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
+//	}
+//}
+void CLanServer::OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, JBuffer** sendPostedQueue) {
 	while (sendBufferQueue.GetSize() > 0) {
 		JBuffer* sendPacket;
 		sendBufferQueue.Dequeue(sendPacket);
 		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
 	}
-	while (!sendPostedQueue.empty()) {
-		JBuffer* sendPacket = sendPostedQueue.front();
-		sendPostedQueue.pop();
-		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+	for (int i = 0; i < WSABUF_ARRAY_DEFAULT_SIZE; i++) {
+		if (sendPostedQueue[i] == NULL) {
+			break;
+		}
+		JBuffer* sendPacket = sendPostedQueue[i];
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
 	}
 }

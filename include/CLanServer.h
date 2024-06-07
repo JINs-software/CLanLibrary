@@ -33,7 +33,8 @@ class CLanServer
 
 #if defined(LOCKFREE_SEND_QUEUE)
 		LockFreeQueue<JBuffer*>	sendBufferQueue;
-		std::queue<JBuffer*>	sendPostedQueue;
+		//std::queue<JBuffer*>	sendPostedQueue;
+		JBuffer* sendPostedQueue[WSABUF_ARRAY_DEFAULT_SIZE];
 #else
 		JBuffer sendRingBuffer;
 #endif
@@ -103,9 +104,11 @@ class CLanServer
 			if (sendBufferQueue.GetSize() > 0) {
 				DebugBreak();
 			}
-			if (!sendPostedQueue.empty()) {
-				DebugBreak();
-			}
+			//if (!sendPostedQueue.empty()) {
+			//	DebugBreak();
+			//}
+			//sendPostedQueue
+			memset(sendPostedQueue, NULL, sizeof(sendPostedQueue));
 #else
 			if (sendRingBuffer.GetUseSize() > 0) {
 				DebugBreak();
@@ -375,16 +378,17 @@ public:
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false);
+	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false, bool reqToWorkerTh = false);
 #else
-	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr);
+	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr, bool reqToWorkerTh = false);
 #endif
 	
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);
 	void ReturnSession(stCLanSession* session);
 
-	void SendPost(uint64 sessionID);
+	void SendPost(uint64 sessionID, bool onSendFlag = false);
+	void SendPostReq(uint64 sessionID);
 
 	stCLanSession* CreateNewSession(SOCKET sock);
 #if defined(SESSION_LOG)
@@ -433,7 +437,8 @@ protected:
 	virtual void OnClientJoin(UINT64 sessionID) = 0;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
-	virtual void OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, std::queue<JBuffer*>& sendPostedQueue);
+	//virtual void OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, std::queue<JBuffer*>& sendPostedQueue);
+	virtual void OnDeleteSendPacket(UINT64 sessionID, LockFreeQueue<JBuffer*>& sendBufferQueue, JBuffer** sendPostedQueue);
 #else
 	virtual void OnDeleteSendPacket(UINT64 sessionID, JBuffer& sendRingBuffer);
 #endif
