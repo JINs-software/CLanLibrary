@@ -6,17 +6,11 @@ class CLanClient : public CLanServer
 {
 public:
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	//CLanServer(const char* serverIP, uint16 serverPort,
-	//	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
-	//	bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
-	//	size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
-	//	uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
-	//	bool beNagle = true
-	//);
 	CLanClient(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+		size_t tlsMemPoolDefaultUnitCnt = 0, size_t tlsMemPoolDefaultCapacity = 0, 
 		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
-		size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+		UINT serialBufferSize = DEFAULT_SERIAL_BUFFER_SIZE,
 #if defined(LOCKFREE_SEND_QUEUE)
 		uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #else
@@ -25,8 +19,8 @@ public:
 		bool beNagle = true
 	)
 		: CLanServer(serverIP, serverPort,numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
-			tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
-			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
+			serialBufferSize,
 #if defined(LOCKFREE_SEND_QUEUE)
 			sessionRecvBuffSize,
 #else
@@ -35,11 +29,6 @@ public:
 			beNagle)
 	{}
 #else
-	//CLanServer(const char* serverIP, UINT16 serverPort,
-	//	DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
-	//	uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
-	//	bool beNagle = true
-	//);
 	CLanClient(const char* serverIP, UINT16 serverPort,
 		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
