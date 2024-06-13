@@ -49,6 +49,7 @@ public:
 
 private:
 	SOCKET		m_CLanClientSock;
+	bool		m_ClientSockAlive = false;
 	JBuffer		m_RecvBufferFromCLanServer;
 	JBuffer		m_SendBufferToCLanServer;
 	std::mutex	m_SendBufferMtx;
@@ -58,6 +59,7 @@ private:
 	WSAOVERLAPPED	m_SendOverlapped;
 
 	HANDLE			m_CLanNetworkThread;
+	bool			m_StopNetworkThread;
 
 	static const BYTE	m_EventCnt = 3;
 	static enum enEvent {
@@ -65,11 +67,14 @@ private:
 		enCLanRecv,
 		enCLanSend
 	};
-	HANDLE		m_Events[m_EventCnt];
+	HANDLE		m_Events[m_EventCnt] = { NULL, };
+
+	bool InitLanClient(const CHAR* clanServerIP, USHORT clanserverPort);
+	void DeleteLanClient();
 
 protected:
-	bool ConnectLanServer(const CHAR* clanServerIP, USHORT clanserverPort, DWORD numOfIocpConcurrentThrd);		//	바인딩 IP, 서버IP / 워커스레드 수 / 나글옵션
-	bool DisconnectLanServer();							
+	bool ConnectLanServer(const CHAR* clanServerIP, USHORT clanserverPort);		//	바인딩 IP, 서버IP / 워커스레드 수 / 나글옵션
+	bool DisconnectLanServer();
 	
 	bool SendPacketToCLanServer(JBuffer* sendPacket, bool encoded = false);
 	void SendPostToCLanServer();
