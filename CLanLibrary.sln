@@ -13,6 +13,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLanClient", "CLanClient\CL
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NetworkCore", "..\0. ServerNetwork\NetworkCore\NetworkCore.vcxproj", "{7FB41558-F01C-4978-819D-6FD349BD0F41}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLanOdbcServer", "CLanOdbcServer\CLanOdbcServer.vcxproj", "{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -61,6 +63,14 @@ Global
 		{7FB41558-F01C-4978-819D-6FD349BD0F41}.Release|x64.Build.0 = Release|x64
 		{7FB41558-F01C-4978-819D-6FD349BD0F41}.Release|x86.ActiveCfg = Release|Win32
 		{7FB41558-F01C-4978-819D-6FD349BD0F41}.Release|x86.Build.0 = Release|Win32
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Debug|x64.ActiveCfg = Debug|x64
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Debug|x64.Build.0 = Debug|x64
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Debug|x86.ActiveCfg = Debug|Win32
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Debug|x86.Build.0 = Debug|Win32
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Release|x64.ActiveCfg = Release|x64
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Release|x64.Build.0 = Release|x64
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Release|x86.ActiveCfg = Release|Win32
+		{EEDDAA3A-D4FD-42F5-B4DD-A445D2D789AE}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
