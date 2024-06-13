@@ -14,6 +14,9 @@
 
 class CLanServer
 {
+	////////////////////////////////////////////////////////////////////////
+	// CLanSession
+	////////////////////////////////////////////////////////////////////////
 	struct stSessionID {
 		uint64 idx			: 16;
 		uint64 incremental	: 48;
@@ -30,36 +33,26 @@ class CLanServer
 		WSAOVERLAPPED sendOverlapped;
 		JBuffer recvRingBuffer;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-
 #if defined(LOCKFREE_SEND_QUEUE)
 		LockFreeQueue<JBuffer*>	sendBufferQueue;
 		//std::queue<JBuffer*>	sendPostedQueue;
 		JBuffer* sendPostedQueue[WSABUF_ARRAY_DEFAULT_SIZE];
 #else
 		JBuffer sendRingBuffer;
+		SRWLOCK sendBuffSRWLock;
 #endif
-
 #else
-		//std::queue<std::shared_ptr<JBuffer>> sendQueueBuffer;
 		std::vector<std::shared_ptr<JBuffer>> sendBufferVector;
 #endif
-		
 		stSessionRef sessionRef;
 		uint32 sendFlag;
-#if defined(SESSION_SENDBUFF_SYNC_TEST)
-		SRWLOCK sendBuffSRWLock;
-		// => 추후 송신 버퍼를 락-프리 큐로 변경, 송신 버퍼를 위한 동기화 객체 생략
-#endif
 
-#if defined(TRACKING_CLIENT_PORT)
-		USHORT	clientPort;
-#endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
-		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE)
+		stCLanSession(uint32 recvBuffSize) : recvRingBuffer(recvBuffSize)
 #else
-		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE), sendRingBuffer(SESSION_SEND_BUFFER_DEFAULT_SIZE)
+		stCLanSession(uint32 recvBuffSize, uint32 sendBuffSize) : recvRingBuffer(recvBuffSize), sendRingBuffer(sendBuffSize)
 #endif
 #else
 		stCLanSession() : recvRingBuffer(SESSION_RECV_BUFFER_DEFAULT_SIZE)
@@ -79,12 +72,10 @@ class CLanServer
 		void Init(SOCKET _sock, stSessionID _Id) {
 			Id = _Id;
 			memcpy(&uiId, &Id, sizeof(Id));			
-
 			// IOCnt를 증가시키고, releaseFlag를 0으로 초기화하는 순서가 중요하다.
 			// (IOCnt를 0으로 1로 초기화하는 방식이 아닌 증가시키는 방식으로)
 			InterlockedIncrement((uint32*)&sessionRef);
-
-			//sessionRef.releaseFlag = 0;						
+			
 			stSessionRef releaseFlagOffRef;
 			releaseFlagOffRef.ioCnt = -1;
 			releaseFlagOffRef.releaseFlag = 0;
@@ -94,26 +85,19 @@ class CLanServer
 			sock = _sock;
 			memset(&recvOverlapped, 0, sizeof(WSAOVERLAPPED));
 			memset(&sendOverlapped, 0, sizeof(WSAOVERLAPPED));
-			//if (recvRingBuffer.GetUseSize() > 0) {
-			//	DebugBreak();
-			//}
-			// => 채팅 서버 테스트 용, 채팅 서버에서는 더미 클라이언트의 송신->수신->종료 순
 			recvRingBuffer.ClearBuffer();
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
 			if (sendBufferQueue.GetSize() > 0) {
 				DebugBreak();
 			}
-			//if (!sendPostedQueue.empty()) {
-			//	DebugBreak();
-			//}
-			//sendPostedQueue
 			memset(sendPostedQueue, NULL, sizeof(sendPostedQueue));
 #else
 			if (sendRingBuffer.GetUseSize() > 0) {
 				DebugBreak();
 			}
 			sendRingBuffer.ClearBuffer();
+			InitializeSRWLock(&sendBuffSRWLock);
 #endif
 #else
 			if (sendBufferVector.size() > 0) {
@@ -121,10 +105,6 @@ class CLanServer
 			}
 #endif
 			sendFlag = false;
-#if defined(SESSION_SENDBUFF_SYNC_TEST)
-			InitializeSRWLock(&sendBuffSRWLock);
-#endif
-
 		}
 		
 		bool TryRelease() {
@@ -151,13 +131,22 @@ class CLanServer
 		}
 	};
 
+
+	////////////////////////////////////////////////////////////////////////
+	// CLanServer
+	////////////////////////////////////////////////////////////////////////
 private:
 
 	/////////////////////////////////
 	// Networking
 	/////////////////////////////////
-	SOCKET m_ListenSock;			// Listen Sock
-	SOCKADDR_IN m_ListenSockAddr;
+	SOCKET			m_ListenSock;			// Listen Sock
+	SOCKADDR_IN		m_ListenSockAddr;
+	UINT64			m_TotalAccept = 0;
+	USHORT			m_AcceptTransaction = 0;
+
+	bool m_Nagle;
+	bool m_ZeroCopySend;
 
 	/////////////////////////////////
 	// Session
@@ -193,45 +182,24 @@ private:
 	vector<DWORD>		m_WorkerThreadIDs;
 	map<DWORD, bool>	m_WorkerThreadStartFlag;
 
-#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-	HANDLE				m_CalcTpsThread;
-protected:
-	LONG				m_CalcTpsItems[NUM_OF_TPS_ITEM];
-	LONG				m_TpsItems[NUM_OF_TPS_ITEM];
-	LONG				m_TotalTransaction[NUM_OF_TPS_ITEM];
-public:
-	inline void IncrementRecvTransaction(LONG cnt = 1) {
-		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], cnt);
-		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], cnt);
-	}
-	inline void IncrementRecvTransactionNoGuard(LONG cnt = 1) {
-		m_CalcTpsItems[RECV_TRANSACTION] += cnt;
-		m_TotalTransaction[RECV_TRANSACTION] += cnt;
-	}
-	inline void IncrementSendTransaction(LONG cnt = 1) {
-		InterlockedAdd(&m_CalcTpsItems[SEND_TRANSACTION], cnt);
-		InterlockedAdd(&m_TotalTransaction[SEND_TRANSACTION], cnt);
-	}
-	inline void IncrementSendTransactionNoGuard(LONG cnt = 1) {
-		m_CalcTpsItems[SEND_TRANSACTION] += cnt;
-		m_TotalTransaction[SEND_TRANSACTION] += cnt;
-	}
-#endif
-
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	/////////////////////////////////
 	// Memory Pool
 	/////////////////////////////////
 public:
 	TlsMemPoolManager<JBuffer> m_SerialBuffPoolMgr;
+	size_t			m_TlsMemPoolDefaultUnitCnt;
+	size_t			m_TlsMemPoolDefaultUnitCapacity;
+	UINT			m_SerialBufferSize;
+
 	DWORD m_SerialBuffPoolIdx;
 	inline JBuffer* AllocSerialBuff() {
-		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, m_SerialBufferSize);
 		msg->ClearBuffer();
 		return msg;
 	}
 	inline JBuffer* AllocSerialSendBuff(USHORT length) {
-		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, m_SerialBufferSize);
 		msg->ClearBuffer();
 
 		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
@@ -247,111 +215,33 @@ public:
 	inline void AddRefSerialBuff(JBuffer* buff) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1);
 	}
-
-#if defined(ALLOC_MEM_LOG)
-	inline JBuffer* AllocSerialBuff(const std::string& log) {
-		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
-		msg->ClearBuffer();
-		return msg;
+	inline size_t GetAllocMemPoolUsageUnitCnt() {
+		//return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
+		return m_SerialBuffPoolMgr.GetAllocatedMemUnitCnt();
 	}
-	inline JBuffer* AllocSerialSendBuff(USHORT length, const std::string& log) {
-		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
-		msg->ClearBuffer();
-
-		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
-		hdr->code = dfPACKET_CODE;
-		hdr->len = length;
-		hdr->randKey = (BYTE)(-1);
-
-		return msg;
-	}
-	inline void FreeSerialBuff(JBuffer* buff, const std::string& log) {
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff, log);
-	}
-	
-	inline void AddRefSerialBuff(JBuffer* buff, const std::string& log) {
-		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1, log);
-	}
-#endif
-
 	inline size_t GetAllocMemPoolUsageSize() {
-		return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
+		//return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
+		return m_SerialBuffPoolMgr.GetAllocatedMemUnitCnt() * (sizeof(stMemPoolNode<JBuffer>) + m_SerialBufferSize);
 	}
-#endif
-
-	/////////////////////////////////
-	// Log
-	/////////////////////////////////
-#if defined(SESSION_LOG)
-protected:
-	enum enSessionWorkType {
-		SESSION_CREATE = 1,
-		SESSION_RELEASE,
-		SESSION_DISCONNECT,
-		SESSION_ACCEPT_WSARECV,
-		SESSION_RETURN_GQCS_Disconn,
-		SESSION_RETURN_GQCS,
-		SESSION_COMPLETE_RECV,
-		SESSION_COMPLETE_SEND,
-		SESSION_WSARECV,
-		SESSION_WSASEND,
-		SESSION_ACQUIRE,
-		SESSION_RETURN,
-		SESSION_AFTER_SENDPOST
-	};
-	struct stSessionLog {
-		enSessionWorkType sessionWork;
-		bool workDone;
-		bool ioPending;
-
-		uint64 sessionID = 0;
-		uint64 sessionIndex;
-
-		int32 iocnt;
-		int32 releaseFlag;
-
-		string log = "";
-
-		void Init() {
-			memset(this, 0, sizeof(stSessionLog) - sizeof(string));
-			log = "";
-		}
-	};
-	std::vector<stSessionLog> m_SessionLog;
-	USHORT m_SessionLogIndex;
-	std::set<uint64> m_CreatedSession;
-	std::mutex m_CreatedSessionMtx;
-
-	stSessionLog& GetSessionLog() {
-		USHORT releaseLogIdx = InterlockedIncrement16((short*)&m_SessionLogIndex);
-		m_SessionLog[releaseLogIdx].Init();
-		return m_SessionLog[releaseLogIdx];
+	inline DWORD AllocTlsMemPool() {
+		return m_SerialBuffPoolMgr.AllocTlsMemPool(m_TlsMemPoolDefaultUnitCnt, m_TlsMemPoolDefaultUnitCapacity, m_SerialBufferSize);
 	}
 
-	// 총 Accept 횟수
-	INT64 m_TotalAcceptCnt = 0;
-	INT64 m_TotalDeleteCnt = 0;
-	INT64 m_TotalLoginCnt = 0;
-#endif
-
-#if defined(SENDBUFF_MONT_LOG)
-	// 최대 송신 버퍼
-	size_t m_SendBuffOfMaxSize;
-	UINT64 m_SessionOfMaxSendBuff;
 #endif
 
 public:
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	CLanServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections, 
+		size_t tlsMemPoolDefaultUnitCnt = 0, size_t tlsMemPoolDefaultUnitCapacity = 0,
 		bool tlsMemPoolReferenceFlag = false, bool tlsMemPoolPlacementNewFlag = false,
-		size_t tlsMemPoolDefaultUnitCnt = TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = TLS_MEM_POOL_DEFAULT_CAPACITY,
+		UINT serialBufferSize = DEFAULT_SERIAL_BUFFER_SIZE,
 #if defined(LOCKFREE_SEND_QUEUE)
 		uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #endif
-		bool beNagle = true
+		bool beNagle = true, bool zeroCopySend = false
 	);
 #else
 	CLanServer(const char* serverIP, UINT16 serverPort,
@@ -377,18 +267,32 @@ public:
 	void Disconnect(uint64 sessionID);
 #endif
 
+	/////////////////////////////////////////////////////////////////
+	// SendPacket
+	// - encoded: false 시, 직렬화 버퍼 인코딩 수행(복수의 공용 헤더가 붙은 메시지들이 있다 가정)
+	// - postToWorker: true 시, SendPost가 아닌 SendPostRequestuest 함수 호출
+	/////////////////////////////////////////////////////////////////
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false, bool reqToWorkerTh = false);
+	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false, bool postToWorker = false);
 #else
 	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr, bool reqToWorkerTh = false);
 #endif
-	
+	////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// BufferSendPacket: 송신 버퍼 큐(또는 링버퍼) 삽입만 수행, 추후 SendBufferedPacket이 없다면 송신 보장 x
+	////////////////////////////////////////////////////////////////////////////////////////////////////////
+	bool BufferSendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false);
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// SendBufferedPacket: 송신 버퍼 큐(또는 링버퍼)에 송신 대기 패킷이 존재한다면 SendPost 또는 SendPostRequset 호출
+	//					   AcquireSession에 대한 부하 고려 필요
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	void SendBufferedPacket(uint64 sessionID, bool postToWorker = false);
+
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);
 	void ReturnSession(stCLanSession* session);
 
 	void SendPost(uint64 sessionID, bool onSendFlag = false);
-	void SendPostReq(uint64 sessionID);
+	void SendPostRequest(uint64 sessionID);
 
 	stCLanSession* CreateNewSession(SOCKET sock);
 #if defined(SESSION_LOG)
@@ -476,18 +380,147 @@ public:
 	// - Recv Message TPS
 	// - Send Message TPS
 	/////////////////////////////////
-	int getAcceptTPS();
-	int getRecvMessageTPS();
-	int getSendMessageTPS();
+	inline USHORT GetAndResetAcceptTransaction() {
+		static clock_t m_LastClock = clock();
+
+		USHORT ret = m_AcceptTransaction;
+		clock_t now = clock();
+		clock_t interval = now - m_LastClock;
+		if (interval >= 1000) {
+			ret = m_AcceptTransaction / (interval / 1000);
+			m_AcceptTransaction = 0;
+			m_LastClock = now;
+		}
+		return ret;
+	}
+	USHORT getRecvMessageTPS();
+	USHORT getSendMessageTPS();
 
 public:
-	virtual void ServerConsoleLog() {}
 	void ConsoleLog();
+	virtual void ServerConsoleLog() {}
+	
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+private:
+	HANDLE				m_CalcTpsThread;
+protected:
+	LONG				m_CalcTpsItems[NUM_OF_TPS_ITEM];
+	LONG				m_TpsItems[NUM_OF_TPS_ITEM];
+	LONG				m_TotalTransaction[NUM_OF_TPS_ITEM];
+public:
+	inline void IncrementRecvTransaction(LONG cnt = 1) {
+		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], cnt);
+		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], cnt);
+	}
+	inline void IncrementRecvTransactionNoGuard(LONG cnt = 1) {
+		m_CalcTpsItems[RECV_TRANSACTION] += cnt;
+		m_TotalTransaction[RECV_TRANSACTION] += cnt;
+	}
+	inline void IncrementSendTransaction(LONG cnt = 1) {
+		InterlockedAdd(&m_CalcTpsItems[SEND_TRANSACTION], cnt);
+		InterlockedAdd(&m_TotalTransaction[SEND_TRANSACTION], cnt);
+	}
+	inline void IncrementSendTransactionNoGuard(LONG cnt = 1) {
+		m_CalcTpsItems[SEND_TRANSACTION] += cnt;
+		m_TotalTransaction[SEND_TRANSACTION] += cnt;
+	}
+#endif
+
 #if defined(ALLOC_MEM_LOG)
+public:
+	inline JBuffer* AllocSerialBuff(const std::string& log) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
+		msg->ClearBuffer();
+		return msg;
+	}
+	inline JBuffer* AllocSerialSendBuff(USHORT length, const std::string& log) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, log);
+		msg->ClearBuffer();
+
+		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
+		hdr->code = dfPACKET_CODE;
+		hdr->len = length;
+		hdr->randKey = (BYTE)(-1);
+
+		return msg;
+	}
+	inline void FreeSerialBuff(JBuffer* buff, const std::string& log) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(buff, log);
+	}
+
+	inline void AddRefSerialBuff(JBuffer* buff, const std::string& log) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(buff, 1, log);
+	}
+#endif
+
+/////////////////////////////////
+// Log
+/////////////////////////////////
+#if defined(ALLOC_MEM_LOG)
+public:
 	void MemAllocLog();
 #endif
 #if defined(SESSION_LOG)
+public:
 	void SessionReleaseLog();
+#endif
+
+#if defined(SESSION_LOG)
+protected:
+	enum enSessionWorkType {
+		SESSION_CREATE = 1,
+		SESSION_RELEASE,
+		SESSION_DISCONNECT,
+		SESSION_ACCEPT_WSARECV,
+		SESSION_RETURN_GQCS_Disconn,
+		SESSION_RETURN_GQCS,
+		SESSION_COMPLETE_RECV,
+		SESSION_COMPLETE_SEND,
+		SESSION_WSARECV,
+		SESSION_WSASEND,
+		SESSION_ACQUIRE,
+		SESSION_RETURN,
+		SESSION_AFTER_SENDPOST
+	};
+	struct stSessionLog {
+		enSessionWorkType sessionWork;
+		bool workDone;
+		bool ioPending;
+
+		uint64 sessionID = 0;
+		uint64 sessionIndex;
+
+		int32 iocnt;
+		int32 releaseFlag;
+
+		string log = "";
+
+		void Init() {
+			memset(this, 0, sizeof(stSessionLog) - sizeof(string));
+			log = "";
+		}
+	};
+	std::vector<stSessionLog> m_SessionLog;
+	USHORT m_SessionLogIndex;
+	std::set<uint64> m_CreatedSession;
+	std::mutex m_CreatedSessionMtx;
+
+	stSessionLog& GetSessionLog() {
+		USHORT releaseLogIdx = InterlockedIncrement16((short*)&m_SessionLogIndex);
+		m_SessionLog[releaseLogIdx].Init();
+		return m_SessionLog[releaseLogIdx];
+	}
+
+	// 총 Accept 횟수
+	INT64 m_TotalAcceptCnt = 0;
+	INT64 m_TotalDeleteCnt = 0;
+	INT64 m_TotalLoginCnt = 0;
+#endif
+
+#if defined(SENDBUFF_MONT_LOG)
+	// 최대 송신 버퍼
+	size_t m_SendBuffOfMaxSize;
+	UINT64 m_SessionOfMaxSendBuff;
 #endif
 };
 
