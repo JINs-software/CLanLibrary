@@ -7,18 +7,26 @@
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
-	bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
-	size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultCapacity,
+	size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultUnitCapacity, bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
+	UINT serialBufferSize,
 #if defined(LOCKFREE_SEND_QUEUE)
 	uint32 sessionRecvBuffSize,
 #else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
-	bool beNagle
+	bool beNagle, bool zeroCopySend
 )
 	: m_MaxOfSessions(maxOfConnections), m_Incremental(0),
 	m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false),
-	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag)
+	m_TlsMemPoolDefaultUnitCnt(tlsMemPoolDefaultUnitCnt), m_TlsMemPoolDefaultUnitCapacity(tlsMemPoolDefaultUnitCapacity),
+	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag),
+	m_SerialBufferSize(serialBufferSize),
+#if defined(LOCKFREE_SEND_QUEUE)
+	m_SessionRecvBufferSize(sessionRecvBuffSize),
+#else
+	m_SessionSendBufferSize(sessionSendBuffSize), m_SessionRecvBufferSize(sessionRecvBuffSize),
+#endif
+	m_Nagle(beNagle), m_ZeroCopySend(zeroCopySend)
 #else
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -67,7 +75,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	}
 	m_Sessions.resize(m_MaxOfSessions + 1, NULL);
 	for (uint16 idx = 1; idx <= m_MaxOfSessions; idx++) {
-		m_Sessions[idx] = new stCLanSession;
+		m_Sessions[idx] = new stCLanSession(m_SessionRecvBufferSize);
 	}
 	InitializeCriticalSection(&m_SessionAllocIdQueueCS);
 
@@ -107,6 +115,12 @@ bool CLanServer::Start()
 	if (ListenSocket(m_ListenSock, SOMAXCONN) == SOCKET_ERROR) {
 		return false;
 	}
+
+	// 링거 옵션 추가 (강제 종료 유도)
+	struct linger linger_option;
+	linger_option.l_onoff = 1;  // SO_LINGER 사용
+	linger_option.l_linger = 0; // 소켓이 닫힐 때 최대 대기 시간 (초)
+	setsockopt(m_ListenSock, SOL_SOCKET, SO_LINGER, (const char*)&linger_option, sizeof(linger_option));
 
 	m_AcceptThread = (HANDLE)_beginthreadex(NULL, 0, CLanServer::AcceptThreadFunc, this, 0, NULL);
 	cout << "[Start Thread] Accept Thread" << endl;
@@ -159,6 +173,7 @@ void CLanServer::Stop()
 
 	for (size_t i = 0; i < m_Sessions.size(); i++) {
 		if (m_Sessions[i]) {
+			shutdown(m_Sessions[i]->sock, SD_BOTH);
 			closesocket(m_Sessions[i]->sock);
 		}
 	}
@@ -196,15 +211,17 @@ void CLanServer::Disconnect(uint64 sessionID)
 {
 	stSessionID orgID = *((stSessionID*)&sessionID);
 	stCLanSession* delSession = m_Sessions[orgID.idx];
+#if defined(_DEBUG)
 	if (delSession->sessionRef.ioCnt < 1) {
 		DebugBreak();
 	}
+#endif
 	PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)delSession, (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_DISCONNECT);
 }
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded, bool reqToWorkerTh) {	// sendDataPtr의 deqOffset은 0으로 가정
+bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded, bool postToWorker) {	// sendDataPtr의 deqOffset은 0으로 가정
 
 	stCLanSession* session = AcquireSession(sessionID);
 	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
@@ -258,12 +275,13 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 
-		if (reqToWorkerTh) {
-			SendPostReq(sessionID);
+		if (postToWorker) {
+			SendPostRequest(sessionID);
 		}
 		else {
 			SendPost(sessionID);
 		}
+		
 	}
 	else {
 		return false;
@@ -286,7 +304,7 @@ bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataP
 		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 
 		if (reqToWorkerTh) {
-			SendPostReq(sessionID);
+			SendPostRequest(sessionID);
 		}
 		else {
 			SendPost(sessionID);
@@ -301,6 +319,84 @@ bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataP
 	return true;
 }
 #endif
+
+bool CLanServer::BufferSendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded) {
+	stCLanSession* session = AcquireSession(sessionID);
+	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
+
+		if (!encoded) {
+			// 인코딩 수행
+			if (sendDataPtr->GetUseSize() < sizeof(stMSG_HDR)) {
+				DebugBreak();
+				return false;
+			}
+			else {
+				UINT offset = 0;
+				stMSG_HDR* hdr;// = (stMSG_HDR*)sendDataPtr->GetDequeueBufferPtr();
+				while (offset < sendDataPtr->GetUseSize()) {
+					hdr = (stMSG_HDR*)sendDataPtr->GetBufferPtr(offset);
+					offset += sizeof(stMSG_HDR);
+					if (hdr->randKey == (BYTE)-1) {
+						hdr->randKey = GetRandomKey();
+						Encode(hdr->randKey, hdr->len, hdr->checkSum, sendDataPtr->GetBufferPtr(offset));
+					}
+					offset += hdr->len;
+				}
+			}
+		}
+
+#if defined(LOCKFREE_SEND_QUEUE)
+		session->sendBufferQueue.Enqueue(sendDataPtr);
+#else
+		AcquireSRWLockExclusive(&session->sendBuffSRWLock);
+
+		if (session->sendRingBuffer.GetFreeSize() < sizeof(UINT_PTR)) {
+			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터를 Enqueue할 여유 사이즈 없음" << endl;
+			DebugBreak();
+		}
+		uint32 enqSize = session->sendRingBuffer.Enqueue((BYTE*)&sendDataPtr, sizeof(UINT_PTR));
+		if (enqSize < sizeof(UINT_PTR)) {
+			// 송신 링-버퍼에 송신 데이터를 복사할 수 있음을 확인했음에도 불구하고,
+			// Enqueue 사이즈가 송신 데이터의 크기보다 작은 상황 발생
+			cout << "[ERROR, SendPacket] 송신 링-버퍼에 송신 데이터 전체 Enqueue 실패" << endl;
+			DebugBreak();
+		}
+
+		ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
+#endif
+	}
+	else {
+		return false;
+	}
+
+	ReturnSession(session);
+
+	return true;
+}
+
+void CLanServer::SendBufferedPacket(uint64 sessionID, bool postToWorker)
+{
+	// AcquireSession 호출 간소화
+	uint16 idx = (uint16)sessionID;
+	stCLanSession* session = m_Sessions[idx];
+	if (session->sendBufferQueue.GetSize() == 0) {
+		return;
+	}
+
+	session = AcquireSession(sessionID);
+	if (session != NULL) {
+		//if (session->sendBufferQueue.GetSize() > 0) {
+			if (postToWorker) {
+				SendPostRequest(sessionID);
+			}
+			else {
+				SendPost(sessionID);
+			}
+		//}
+
+		ReturnSession(session);
+	}
+}
 
 CLanServer::stCLanSession* CLanServer::AcquireSession(uint64 sessionID)
 {
@@ -415,9 +511,11 @@ void CLanServer::ReturnSession(stCLanSession* session)
 
 	uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
 	stSessionRef sessionRef = *((stSessionRef*)&uiRef);
+#if defined(_DEBUG)
 	if (sessionRef.ioCnt < 0) {
 		DebugBreak();
 	}
+#endif
 
 #if defined(SESSION_LOG)
 	sessionLog.iocnt = sessionRef.ioCnt;
@@ -441,9 +539,11 @@ void CLanServer::ReturnSession(stCLanSession* session)
 		// 새로운 세션 생성 전
 		// nothing to do..
 	}
+#if defined(_DEBUG)
 	else if (sessionRef.ioCnt < 0) {
 		DebugBreak();
 	}
+#endif
 	else {
 #if defined(SESSION_LOG)
 		sessionLog.workDone = true;
@@ -459,9 +559,11 @@ void CLanServer::SendPost(uint64 sessionID, bool onSendFlag)
 {
 	uint16 idx = (uint16)sessionID;
 	stCLanSession* session = m_Sessions[idx];
+#if defined(_DEBUG)
 	if (session == nullptr) {
 		DebugBreak();
 	}
+#endif
 
 	if (onSendFlag || InterlockedExchange(&session->sendFlag, 1) == 0) {
 		session->clearSendOverlapped();	// 송신용 overlapped 구조체 초기화
@@ -501,9 +603,11 @@ void CLanServer::SendPost(uint64 sessionID, bool onSendFlag)
 
 				wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
 				wsabuffs[idx].len = msgPtr->GetUseSize();
+#if defined(_DEBUG)
 				if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
 					DebugBreak();
 				}
+#endif
 				
 #else
 				session->sendRingBuffer.Peek(sizeof(UINT_PTR) * idx, (BYTE*)&msgPtr, sizeof(UINT_PTR));
@@ -547,42 +651,16 @@ void CLanServer::SendPost(uint64 sessionID, bool onSendFlag)
 
 					assert(sessionRef.ioCnt >= 0);
 					if (sessionRef.ioCnt == 0) {
-						bool workerFlag = false;
-
-						//HANDLE thHnd = GetCurrentThread();
-						//for (int i = 0; i < m_NumOfWorkerThreads; i++) {
-						//	if (m_WorkerThreads[i] == thHnd) {
-						//		if (DeleteSession(sessionID, "SendPost, WSASendFail")) {
-						//			OnClientLeave(sessionID);
-						//		}
-						//		workerFlag = true;
-						//		break;
-						//	}
-						//}
-						// => 가상 핸들 반환 시 m_WorkerThreads의 핸들과 비교하기 위해선 DuplicateHandle로 실제 핸들을 반환해야 함.
-						// => 간단히 스레드 ID로 비교 확인하는 방식으로 변경
-						DWORD thID = GetCurrentThreadId();
 						for (int i = 0; i < m_NumOfWorkerThreads; i++) {
-							if (m_WorkerThreadIDs[i] == thID) {
 #if defined(SESSION_LOG)
-								if (DeleteSession(sessionID, "SendPost, WSASendFail")) {
+							if (DeleteSession(sessionID, "SendPost, WSASendFail")) {
 #else
-								if (DeleteSession(sessionID)) {
+							if (DeleteSession(sessionID)) {
 #endif
-									OnClientLeave(sessionID);
-								}
-								workerFlag = true;
-								break;
+								OnClientLeave(sessionID);
 							}
-						}
-
-						if (!workerFlag) {
-							DebugBreak();		// 업데이트 스레드에서는 항상 AcquireSession 호출 후 SendPost 호출 판단
-												// 따라서 ioCnt >= 1 이 보장됨을 가정하기에 해당 부분 로직을 타는 것은 비정상적인 상황임을 인지
-							//stCLanSession* disconnectedSession = AcquireSession(sessionID);
-							//if (disconnectedSession != nullptr) {
-							//	Disconnect(sessionID, "SendPost, WSASendFail");
-							//}
+							break;
+							
 						}
 					}
 				}
@@ -604,25 +682,20 @@ void CLanServer::SendPost(uint64 sessionID, bool onSendFlag)
 	}
 }
 
-void CLanServer::SendPostReq(uint64 sessionID)
+void CLanServer::SendPostRequest(uint64 sessionID)
 {
+	// SendPost와 마찬가지로 세션 ioCnt >= 1이 보장된 상태에서 호출이 가정됨.
 	stSessionID orgID = *((stSessionID*)&sessionID);
 	stCLanSession* session = m_Sessions[orgID.idx];
 
-	// 송신 플래그가 0일때에만 PostQueue
-	// 이 방식으로 Post 호출 절약
-	// 송신 플래그가 1일 때에는 송신 완료 측에서 알아서 송신할 것
-	//if (session->sendFlag == 0) {
-	//	InterlockedIncrement((uint32*)&session->sessionRef);
-	//	PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)session, (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ);
-	//}
-
-	if (InterlockedExchange(&session->sendFlag, 1) == 0) {
+	// 세션 송신 플래그 off 상태에서만 Post를 수행하여 iocp 큐잉 부하를 감소시킨다. 
+	// iocp 작업자 스레드에서 해당 요청을 받으면, 
+	// onSendFlag on 상태로 SendPost 호출, 그리고 ioCnt를 감소시키고 세션 종료 판단을 수행
+	if(InterlockedCompareExchange(&session->sendFlag, 1, 0) == 0) {
 		InterlockedIncrement((uint32*)&session->sessionRef);
 		PostQueuedCompletionStatus(m_IOCP, 0, (ULONG_PTR)session, (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ);
 	}
 }
-
 
 CLanServer::stCLanSession* CLanServer::CreateNewSession(SOCKET sock)
 {
@@ -729,23 +802,28 @@ bool CLanServer::DeleteSession(uint64 sessionID)
 
 	uint16 idx = (uint16)sessionID;
 	stCLanSession* delSession = m_Sessions[idx];
+#if defined(_DEBUG)
 	if (delSession == nullptr) {
 		DebugBreak();
 		return false;
 	}
+#endif
 
 	stSessionID orgID = *((stSessionID*)&sessionID);
 
 	if (delSession->TryRelease()) {
 		ret = true;
-
+#if defined(_DEBUG)
 		if (delSession->uiId != sessionID) {
 			DebugBreak();
 		}
+#endif
 
 		// 세션 삭제
 		uint16 allocatedIdx = delSession->Id.idx;
-		closesocket(m_Sessions[allocatedIdx]->sock);
+		SOCKET delSock = m_Sessions[allocatedIdx]->sock;
+		shutdown(delSock, SD_BOTH);
+		closesocket(delSock);
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
@@ -769,19 +847,20 @@ bool CLanServer::DeleteSession(uint64 sessionID)
 UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 {
 	CLanServer* clanserver = (CLanServer*)arg;
+
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool(clanserver->m_TlsMemPoolDefaultUnitCnt, clanserver->m_TlsMemPoolDefaultUnitCapacity, clanserver->m_SerialBufferSize);	// 생성자에서 설정한 Default 값을 따름
+#endif
+
 	while (true) {
 		SOCKADDR_IN clientAddr;
 		int addrLen = sizeof(clientAddr);
-		// 세션 초과 -> down client 막기 임시 방편
-		//while (true) {
-		//	if (clanserver->OnConnectionRequest()) {
-		//		break;
-		//	}
-		//}
-		//////////////////////////////////////////
 		SOCKET clientSock = ::accept(clanserver->m_ListenSock, (sockaddr*)&clientAddr, &addrLen);
+		clanserver->m_TotalAccept++;
+		clanserver->m_AcceptTransaction++;
 		if (clientSock != INVALID_SOCKET) {
 			if (!clanserver->OnConnectionRequest()) {
+				shutdown(clientSock, SD_BOTH);
 				closesocket(clientSock);
 			}
 			else {
@@ -867,7 +946,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 	clanserver->OnWorkerThreadStart();
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
+	clanserver->m_SerialBuffPoolIdx = clanserver->m_SerialBuffPoolMgr.AllocTlsMemPool(clanserver->m_TlsMemPoolDefaultUnitCnt, clanserver->m_TlsMemPoolDefaultUnitCapacity, clanserver->m_SerialBufferSize);	// 생성자에서 설정한 Default 값을 따름
 #endif
 
 	while (true) {
@@ -878,6 +957,9 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 		GetQueuedCompletionStatus(clanserver->m_IOCP, &transferred, (PULONG_PTR)&completionKey, &overlappedPtr, INFINITE);
 		// transffered == 0으로 먼저 분기를 나누지 않은 이유는? transferred와 session(lpCompletionKey)에 대한 초기화를 매번 진행하고 싶지 않아서 
 		if (overlappedPtr != NULL) {
+			/////////////////////////////////////////////////////////////////////////////////////////////
+			// IOCP_COMPLTED_LPOVERLAPPED_DISCONNECT: iocp 작업자 스레드 외 스레드의 Disconnect 요청 수행
+			/////////////////////////////////////////////////////////////////////////////////////////////
 			if (overlappedPtr == (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_DISCONNECT) {
 			
 				// 연결 종료 판단
@@ -895,9 +977,11 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 				// 연결 종료 판단
 				uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
 				stSessionRef sessionRef = *((stSessionRef*)&uiRef);
+#if defined(_DEBUG)
 				if (sessionRef.ioCnt < 0) {
 					DebugBreak();
 				}
+#endif
 				if (sessionRef.ioCnt == 0) {
 					// 세션 제거...
 					uint64 sessionID = session->uiId;
@@ -916,9 +1000,14 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 				}
 #endif
 			}
+			/////////////////////////////////////////////////////////////////////////////////////////////
+			// IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ: SendPostRequest를 통해 큐잉된 송신 요청
+			/////////////////////////////////////////////////////////////////////////////////////////////
 			else if (overlappedPtr == (LPOVERLAPPED)IOCP_COMPLTED_LPOVERLAPPED_SENDPOST_REQ) {
 				stCLanSession* session = (stCLanSession*)completionKey;
-
+				// IOCP 작업자 스레드 측에서 SendPost 호출
+				clanserver->SendPost(session->uiId, true);
+				
 				uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
 				stSessionRef sessionRef = *((stSessionRef*)&uiRef);
 				assert(sessionRef.ioCnt >= 0);
@@ -933,10 +1022,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 						clanserver->OnClientLeave(sessionID);
 					}
 				}
-				else {
-					// IOCP 작업자 스레드 측에서 SendPost 호출
-					clanserver->SendPost(session->uiId, true);
-				}
+
 			}
 			else if (transferred == 0) {
 				// 연결 종료 판단
@@ -952,9 +1038,11 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 				uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
 				stSessionRef sessionRef = *((stSessionRef*)&uiRef);
+#if defined(_DEBUG)
 				if (sessionRef.ioCnt < 0) {
 					DebugBreak();
 				}
+#endif
 				if(sessionRef.ioCnt == 0) {
 					// 세션 제거...
 					uint64 sessionID = session->uiId;
@@ -997,10 +1085,12 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					wsabuf.buf = (CHAR*)session->recvRingBuffer.GetEnqueueBufferPtr();
 					wsabuf.len = session->recvRingBuffer.GetDirectEnqueueSize();
 					DWORD dwflag = 0;
+#if defined(_DEBUG)
 					if (wsabuf.len == 0) {
 						// 0 바이트 수신 요청이 발생하는지 확인
 						DebugBreak();
 					}
+#endif
 
 #if defined(SESSION_LOG)
 					stSessionLog& wsaRecvLog = clanserver->GetSessionLog();
@@ -1061,15 +1151,13 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					//					InterlockedAdd(&clanserver->m_CalcTpsItems[SEND_TRANSACTION], session->sendOverlapped.Offset);
 					//					InterlockedAdd(&clanserver->m_TotalTransaction[SEND_TRANSACTION], session->sendOverlapped.Offset);
 					//#endif
-										//// 송신 완료된 직렬화 버퍼 디큐잉 및 메모리 반환
-										//AcquireSRWLockExclusive(&session->sendBuffSRWLock);
-										//for (int i = 0; i < session->sendOverlapped.Offset; i++) {
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 #if defined(LOCKFREE_SEND_QUEUE)
 					for (int i = 0; i < session->sendOverlapped.Offset; i++) {
 						//JBuffer* sendBuff = session->sendPostedQueue.front();
 						//session->sendPostedQueue.pop();
 						// => pop 오버헤드 제거
+
 						JBuffer* sendBuff = session->sendPostedQueue[i];
 						session->sendPostedQueue[i] = NULL;
 						
@@ -1095,11 +1183,61 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					ReleaseSRWLockExclusive(&session->sendBuffSRWLock);
 #endif
 					
+					//uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
+					//stSessionRef sessionRef = *((stSessionRef*)&uiRef);
+					//assert(sessionRef.ioCnt >= 0);
+					//if (sessionRef.ioCnt == 0) {
+					//	// 세션 연결 종료 판단
+					//	uint64 sessionID = session->uiId;
+					//	if (clanserver->DeleteSession(sessionID)) {
+					//		clanserver->OnClientLeave(sessionID);
+					//	}
+					//}
+					//else {
+					//	// 세션 연결 유지 -> 추가적인 송신 데이터 존재 시 SendPost 호출
+					//	if (session->sendBufferQueue.GetSize() > 0) {
+					//		clanserver->SendPost(session->uiId, true);
+					//	}
+					//	else {
+					//		InterlockedExchange(&session->sendFlag, 0);
+					//	}
+					//}
+					// => 송신 버퍼 큐의 사이즈 확인과 sendFlag 변경이 원자적으로 수행되지 않는 문제 식별
+					// ex) 송신 버퍼 큐 사이즈 == 0 임을 확인한 시점 이후, 다른 스레드에서 송신 버퍼 인큐. 하지만 sendFlag는 아직 On이기에 PostQueue 수행 x
+					//     송신 완료 처리 로직이 복귀되면 송신 버퍼 큐에 송신 패킷이 존재함에도 불구하고 송신하지 못하는 상황 발생
+					// => 기존 방식대로 sendFlag를 먼저 off하는 방식이 필요
 
 					// sendFlag Off
 					InterlockedExchange(&session->sendFlag, 0);
 
-					// ioCnt 감소
+					// 세션 연결 유지 -> 추가적인 송신 데이터 존재 시 SendPost 호출
+					bool sendAgainFlag = false;
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+#if defined(LOCKFREE_SEND_QUEUE)
+					if (session->sendBufferQueue.GetSize() > 0) {
+						sendAgainFlag = true;
+					}
+#else
+					AcquireSRWLockShared(&session->sendBuffSRWLock);
+					if (session->sendRingBuffer.GetUseSize() >= sizeof(UINT_PTR)) {
+						sendAgainFlag = true;
+					}
+					ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
+#else
+					AcquireSRWLockShared(&session->sendBuffSRWLock);
+					if (session->sendBufferVector.size() > 0) {
+						sendAgainFlag = true;
+					}
+					ReleaseSRWLockShared(&session->sendBuffSRWLock);
+#endif
+
+					if (sendAgainFlag) {
+						clanserver->SendPost(session->uiId);
+
+					}
+
+					// SendPost에서는 세션 유효성 판단을 하지 않는다. 따라서 ioCnt >= 1을 보장한 상태에서 호출한 후 송신 완료 후반부에 ioCnt를 감소시켜야 함.
 					uint32 uiRef = InterlockedDecrement((uint32*)&session->sessionRef);
 					stSessionRef sessionRef = *((stSessionRef*)&uiRef);
 					assert(sessionRef.ioCnt >= 0);
@@ -1114,42 +1252,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 							clanserver->OnClientLeave(sessionID);
 						}
 					}
-					else {
-						// 세션 연결 유지 -> 추가적인 송신 데이터 존재 시 SendPost 호출
-						bool sendAgainFlag = false;
-#if defined(ALLOC_BY_TLS_MEM_POOL)
-#if defined(LOCKFREE_SEND_QUEUE)
-						if (session->sendBufferQueue.GetSize() > 0) {
-							sendAgainFlag = true;
-						}
-#else
-						AcquireSRWLockShared(&session->sendBuffSRWLock);
-						if (session->sendRingBuffer.GetUseSize() >= sizeof(UINT_PTR)) {
-							sendAgainFlag = true;
-						}
-						ReleaseSRWLockShared(&session->sendBuffSRWLock);
-#endif
-#else
-						AcquireSRWLockShared(&session->sendBuffSRWLock);
-						if (session->sendBufferVector.size() > 0) {
-							sendAgainFlag = true;
-						}
-						ReleaseSRWLockShared(&session->sendBuffSRWLock);
-#endif
-
-						if (sendAgainFlag) {
-							clanserver->SendPost(session->uiId);
-
-#if defined(SESSION_LOG)
-							stSessionLog& afterSendPostLog = clanserver->GetSessionLog();
-							afterSendPostLog.sessionWork = SESSION_AFTER_SENDPOST;
-							afterSendPostLog.sessionID = session->uiId;
-							afterSendPostLog.sessionIndex = (uint16)session->uiId;
-							afterSendPostLog.iocnt = sessionRef.ioCnt;
-							afterSendPostLog.releaseFlag = sessionRef.releaseFlag;
-#endif
-						}
-					}
+					
 				}
 				else {
 					// 수신 완료도 송신 완료도 아닌 비정상적 상황
@@ -1169,6 +1272,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 	return 0;
 }
 
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
 UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
 {
 	CLanServer* clanserver = (CLanServer*)arg;
@@ -1196,6 +1300,7 @@ UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
 	}
 	return 0;
 }
+#endif
 
 //EnterCriticalSection(&m_SessionAllocIdQueueCS);
 //if (!m_SessionAllocIdQueue.empty()
@@ -1552,62 +1657,74 @@ void CLanServer::ConsoleLog()
 	coord.Y = 0;
 	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
 
+	std::cout << "================ SERVER CORE CONSOLE MONT ================ " << std::endl;
+	// Accept TPS
+	std::cout << "[Accept] Total Accept Count : " << m_TotalAccept << std::endl;
+	std::cout << "[Accept] Accept TPS         : " << GetAndResetAcceptTransaction() << std::endl;
+	std::cout << "----------------------------------------------------------" << std::endl;
 	ServerConsoleLog();
+	std::cout << "========================================================== " << std::endl;
 
-#if defined(SESSION_LOG)
-	std::cout << "Total Accept: " << m_TotalAcceptCnt << std::endl;
-	std::cout << "Total Login : " << m_TotalLoginCnt << std::endl;
-	std::cout << "Total Delete: " << m_TotalDeleteCnt << std::endl;
-#endif
-#if defined(SENDBUFF_MONT_LOG)
-	std::cout << "[최대 송신 버퍼 사용 크기]: " << m_SendBuffOfMaxSize << "                                                " << std::endl;
-	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
-#endif
-#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-	std::cout << "Accept TPS      : " << m_TpsItems[ACCEPT_TRANSACTION] << std::endl;
-	std::cout << "Accept Total    : " << m_TotalTransaction[ACCEPT_TRANSACTION] << std::endl;
-	std::cout << "Recv TPS        : " << m_TpsItems[RECV_TRANSACTION] << std::endl;
-	std::cout << "Recv Total      : " << m_TotalTransaction[RECV_TRANSACTION] << std::endl;
-	std::cout << "Send TPS        : " << m_TpsItems[SEND_TRANSACTION] << std::endl;
-	std::cout << "Send Total      : " << m_TotalTransaction[SEND_TRANSACTION] << std::endl;
-	std::cout << "Send(REQ) Total : " << m_TotalTransaction[SEND_REQ_TRANSACTION] << std::endl;
-#endif
-
-#if defined(ALLOC_BY_TLS_MEM_POOL)
-	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
-	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
-	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
-	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
-	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
-#endif
 	
-	std::cout << "[m_SessionAllocIdQueue size] "  << m_SessionAllocIdQueue.size() << "                            " << std::endl;
-#if defined(SESSION_LOG)
-	std::cout << "[m_CreatedSession size] " << m_CreatedSession.size() << "                            " << std::endl;
-#endif
 
-	std::cout << "[Log Count] " << logCnt++ << "                                                " << std::endl;
-#if defined(ALLOC_BY_TLS_MEM_POOL)
-	std::cout << "Total Alloc Mem Count : " << totalAllocMemCnt << "                            " << std::endl;
-	std::cout << "Total Free Mem Count  : " << totalFreeMemCnt << "                             " << std::endl;
-	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                        " << std::endl;
-	std::cout << "Total Decrement RefCnt: " << totalDecrementRefCnt << "                        " << std::endl;
-	std::cout << "------------------------------------------                                    " << std::endl;
-	size_t totalUnitCnt = 0;
-	for (auto iter = memInfos.begin(); iter != memInfos.end(); iter++) {
-		std::cout << "[Thread: " << iter->first << "]                                           " << std::endl;
-		std::cout << "TlsMemPoolUnitCnt : " << iter->second.tlsMemPoolUnitCnt << "              " << std::endl;
-		std::cout << "LFMemPoolUnitCnt  : " << iter->second.lfMemPoolFreeCnt << "               " << std::endl;
-		std::cout << "MallocCnt         : " << iter->second.mallocCnt << "                      " << std::endl;
-
-		totalUnitCnt += iter->second.tlsMemPoolUnitCnt;
-		totalUnitCnt += iter->second.lfMemPoolFreeCnt;
-	}
-
-	std::cout << "------------------------------------------                                    " << std::endl;
-	std::cout << "Total Unit Cnt: " << totalUnitCnt << "                                        " <<std::endl;
-	std::cout << "==========================================                                    " << std::endl;
-#endif
+//#if defined(SESSION_LOG)
+//	std::cout << "Total Accept: " << m_TotalAcceptCnt << std::endl;
+//	std::cout << "Total Login : " << m_TotalLoginCnt << std::endl;
+//	std::cout << "Total Delete: " << m_TotalDeleteCnt << std::endl;
+//#endif
+//#if defined(SENDBUFF_MONT_LOG)
+//	std::cout << "[최대 송신 버퍼 사용 크기]: " << m_SendBuffOfMaxSize << "                                                " << std::endl;
+//	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
+//#endif
+//#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+//	std::cout << "Accept TPS      : " << m_TpsItems[ACCEPT_TRANSACTION] << std::endl;
+//	std::cout << "Accept Total    : " << m_TotalTransaction[ACCEPT_TRANSACTION] << std::endl;
+//	std::cout << "Recv TPS        : " << m_TpsItems[RECV_TRANSACTION] << std::endl;
+//	std::cout << "Recv Total      : " << m_TotalTransaction[RECV_TRANSACTION] << std::endl;
+//	std::cout << "Send TPS        : " << m_TpsItems[SEND_TRANSACTION] << std::endl;
+//	std::cout << "Send Total      : " << m_TotalTransaction[SEND_TRANSACTION] << std::endl;
+//	std::cout << "Send(REQ) Total : " << m_TotalTransaction[SEND_REQ_TRANSACTION] << std::endl;
+//#endif
+//
+//#if defined(ALLOC_BY_TLS_MEM_POOL)
+//	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
+//	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
+//#if defined(MEMORY_USAGE_TRACKING)
+//	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
+//	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
+//	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
+//#endif
+//#endif
+//	
+//	std::cout << "[m_SessionAllocIdQueue size] "  << m_SessionAllocIdQueue.size() << "                            " << std::endl;
+//#if defined(SESSION_LOG)
+//	std::cout << "[m_CreatedSession size] " << m_CreatedSession.size() << "                            " << std::endl;
+//#endif
+//
+//	std::cout << "[Log Count] " << logCnt++ << "                                                " << std::endl;
+//#if defined(ALLOC_BY_TLS_MEM_POOL)
+//	std::cout << "Total Alloc Mem Count : " << totalAllocMemCnt << "                            " << std::endl;
+//	std::cout << "Total Free Mem Count  : " << totalFreeMemCnt << "                             " << std::endl;
+//#if defined(MEMORY_USAGE_TRACKING)
+//	std::cout << "Total Increment RefCnt: " << totalIncrementRefCnt << "                        " << std::endl;
+//	std::cout << "Total Decrement RefCnt: " << totalDecrementRefCnt << "                        " << std::endl;
+//	
+//	std::cout << "------------------------------------------                                    " << std::endl;
+//	size_t totalUnitCnt = 0;
+//	for (auto iter = memInfos.begin(); iter != memInfos.end(); iter++) {
+//		std::cout << "[Thread: " << iter->first << "]                                           " << std::endl;
+//		std::cout << "TlsMemPoolUnitCnt : " << iter->second.tlsMemPoolUnitCnt << "              " << std::endl;
+//		std::cout << "LFMemPoolUnitCnt  : " << iter->second.lfMemPoolFreeCnt << "               " << std::endl;
+//		std::cout << "MallocCnt         : " << iter->second.mallocCnt << "                      " << std::endl;
+//		totalUnitCnt += iter->second.tlsMemPoolUnitCnt;
+//		totalUnitCnt += iter->second.lfMemPoolFreeCnt;
+//	}
+//
+//	std::cout << "------------------------------------------                                    " << std::endl;
+//	std::cout << "Total Unit Cnt: " << totalUnitCnt << "                                        " <<std::endl;
+//	std::cout << "==========================================                                    " << std::endl;
+//#endif
+//#endif
 }
 
 #if defined(ALLOC_MEM_LOG)
