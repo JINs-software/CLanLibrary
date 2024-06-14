@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\CLanOdbcServer.h" />
+    <ClInclude Include="..\include\DBConnection.h" />
+    <ClInclude Include="..\include\DBConnectionPool.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DBConnection.cpp" />

@@ -93,6 +93,19 @@ bool DBConnection::Fetch()
 	}
 }
 
+bool DBConnection::GetSQLData(INT32& data)
+{
+	SQLLEN indicator;
+	SQLINTEGER count;
+	SQLRETURN ret = SQLGetData(_statement, 1, SQL_C_SLONG, &count, sizeof(count), &indicator);
+	if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO) {
+		data = count;
+		return true;
+	}
+
+	return false;
+}
+
 INT32 DBConnection::GetRowCount()
 {
 	SQLLEN count = 0;

@@ -37,7 +37,11 @@ public:
 		m_DBConnPool = new DBConnectionPool();
 
 		if (!m_DBConnPool->Connect(m_DBConnCnt, m_OdbcConnStr)) {
+			std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Fail!" << std::endl;
 			DebugBreak();
+		}
+		else {
+			std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Success!" << std::endl;
 		}
 	}
 

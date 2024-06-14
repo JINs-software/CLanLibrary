@@ -19,6 +19,8 @@ public:
 	// SELECT 계열의 쿼리를 요청할 때 결과를 받기 위한 함수
 	bool			Fetch();
 
+	bool			GetSQLData(INT32& data);
+
 	// 데이터가 몇 개가 있는지 확인하기 위한 함수
 	INT32			GetRowCount();
 
