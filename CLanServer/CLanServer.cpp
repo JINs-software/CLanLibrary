@@ -1662,40 +1662,33 @@ void CLanServer::ConsoleLog()
 	std::cout << "[Accept] Total Accept Count : " << m_TotalAccept << std::endl;
 	std::cout << "[Accept] Accept TPS         : " << GetAndResetAcceptTransaction() << std::endl;
 	std::cout << "----------------------------------------------------------" << std::endl;
-	ServerConsoleLog();
-	std::cout << "========================================================== " << std::endl;
 
-	
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	// TLS 메모리 풀
+	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
+	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
+	size_t allocatedUnitCnt = m_SerialBuffPoolMgr.GetAllocatedMemUnitCnt();
+	size_t totalInjectedMemCnt = m_SerialBuffPoolMgr.GetTotalInjectedMemCnt();
+	std::cout << "[Memory Pool] Total Alloc Count        : " << totalAllocMemCnt << std::endl;
+	std::cout << "[Memory Pool] Total Free Count         : " << totalFreeMemCnt << std::endl;
+	std::cout << "[Memory Pool] Allocated Mem Count      : " << allocatedUnitCnt << std::endl;
+	std::cout << "[Memory Pool] Total Injected Mem Count : " << totalInjectedMemCnt << std::endl;
+	std::cout << "----------------------------------------------------------" << std::endl;
 
-//#if defined(SESSION_LOG)
-//	std::cout << "Total Accept: " << m_TotalAcceptCnt << std::endl;
-//	std::cout << "Total Login : " << m_TotalLoginCnt << std::endl;
-//	std::cout << "Total Delete: " << m_TotalDeleteCnt << std::endl;
-//#endif
+#if defined(MEMORY_USAGE_TRACKING)
+	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
+	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
+	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
+#endif
+#endif
+
 //#if defined(SENDBUFF_MONT_LOG)
 //	std::cout << "[최대 송신 버퍼 사용 크기]: " << m_SendBuffOfMaxSize << "                                                " << std::endl;
 //	std::cout << "[최대 송신 버퍼 사용 세션]: " << m_SessionOfMaxSendBuff << "                                                " << std::endl;
 //#endif
-//#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-//	std::cout << "Accept TPS      : " << m_TpsItems[ACCEPT_TRANSACTION] << std::endl;
-//	std::cout << "Accept Total    : " << m_TotalTransaction[ACCEPT_TRANSACTION] << std::endl;
-//	std::cout << "Recv TPS        : " << m_TpsItems[RECV_TRANSACTION] << std::endl;
-//	std::cout << "Recv Total      : " << m_TotalTransaction[RECV_TRANSACTION] << std::endl;
-//	std::cout << "Send TPS        : " << m_TpsItems[SEND_TRANSACTION] << std::endl;
-//	std::cout << "Send Total      : " << m_TotalTransaction[SEND_TRANSACTION] << std::endl;
-//	std::cout << "Send(REQ) Total : " << m_TotalTransaction[SEND_REQ_TRANSACTION] << std::endl;
-//#endif
-//
-//#if defined(ALLOC_BY_TLS_MEM_POOL)
-//	size_t totalAllocMemCnt = m_SerialBuffPoolMgr.GetTotalAllocMemCnt();
-//	size_t totalFreeMemCnt = m_SerialBuffPoolMgr.GetTotalFreeMemCnt();
-//#if defined(MEMORY_USAGE_TRACKING)
-//	size_t totalIncrementRefCnt = m_SerialBuffPoolMgr.GetTotalIncrementRefCnt();
-//	size_t totalDecrementRefCnt = m_SerialBuffPoolMgr.GetTotalDecrementRefCnt();
-//	std::unordered_map<DWORD, stMemoryPoolUseInfo> memInfos = m_SerialBuffPoolMgr.GetMemInfo();
-//#endif
-//#endif
-//	
+
+
+
 //	std::cout << "[m_SessionAllocIdQueue size] "  << m_SessionAllocIdQueue.size() << "                            " << std::endl;
 //#if defined(SESSION_LOG)
 //	std::cout << "[m_CreatedSession size] " << m_CreatedSession.size() << "                            " << std::endl;
@@ -1725,6 +1718,9 @@ void CLanServer::ConsoleLog()
 //	std::cout << "==========================================                                    " << std::endl;
 //#endif
 //#endif
+
+	ServerConsoleLog();
+	std::cout << "========================================================== " << std::endl;
 }
 
 #if defined(ALLOC_MEM_LOG)

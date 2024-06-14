@@ -27,6 +27,12 @@ void CLanClient::DeleteLanClient()
 {
 	closesocket(m_CLanClientSock);
 	m_ClientSockAlive = false;
+
+	while (m_SendBufferToCLanServer.GetUseSize() >= sizeof(JBuffer*)) {
+		JBuffer* sendBuff;
+		m_SendBufferToCLanServer >> sendBuff;
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
+	}
 }
 
 bool CLanClient::ConnectLanServer(const CHAR* clanServerIP, USHORT clanserverPort)
