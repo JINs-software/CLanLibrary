@@ -887,7 +887,7 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 					session->recvRingBuffer.DirectMoveEnqueueOffset(transferred);
 					UINT recvBuffSize = session->recvRingBuffer.GetUseSize();
 					if (recvBuffSize > clanserver->m_MaxOfRecvBufferSize) {
-						clanserver->m_MaxOfRecvBufferSize = clanserver->m_MaxOfRecvBufferSize;
+						clanserver->m_MaxOfRecvBufferSize = recvBuffSize;
 					}
 
 					//clanserver->OnRecv(session->uiId, session->recvRingBuffer);	// OnRecv 함수에서는 에코 송신을 수행한다. 
@@ -1254,10 +1254,10 @@ void CLanServer::ConsoleLog()
 	std::cout << "[Accept] Total Accept Count : " << m_TotalAccept << std::endl;
 	std::cout << "[Accept] Accept TPS         : " << GetAndResetAcceptTransaction() << std::endl;
 	std::cout << "----------------------------------------------------------" << std::endl;
-	std::cout << "[Session] Session acceptance limit		: " << m_MaxOfSessions << std::endl;
-	std::cout << "[Session] Current number of sessions      : " << GetSessionCount() << std::endl;
-	std::cout << "[Session] Number of Acceptances Available : " << m_SessionAllocIdQueue.size() << std::endl;
-	std::cout << "[Session Buffer] Max of Recv Ring Buffer Size    : " << m_MaxOfRecvBufferSize << std::endl;
+	std::cout << "[Session] Session acceptance limit               : " << m_MaxOfSessions << std::endl;
+	std::cout << "[Session] Current number of sessions             : " << GetSessionCount() << std::endl;
+	std::cout << "[Session] Number of Acceptances Available        : " << m_SessionAllocIdQueue.size() << std::endl;
+	std::cout << "[Session Buffer] Max of Recv Ring Buffer Size    : " << m_MaxOfRecvBufferSize << " Bytes" << std::endl;
 	std::cout << "[Session Buffer] Max of Serial Send Buffer Count : " << m_MaxOfBufferedSerialSendBufferCnt << std::endl;
 	std::cout << "----------------------------------------------------------" << std::endl;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
@@ -1270,7 +1270,7 @@ void CLanServer::ConsoleLog()
 	std::cout << "[Memory Pool] Total Free Count            : " << totalFreeMemCnt << std::endl;
 	std::cout << "[Memory Pool] Allocated Mem Count         : " << allocatedUnitCnt << std::endl;
 	std::cout << "[Memory Pool] Total Malloc Mem Unit Count : " << totalInjectedMemCnt << std::endl;
-	std::cout << "[Memory Pool] Total Malloc Mem Unit Size  : " << totalInjectedMemCnt * m_SerialBufferSize / (1024*1024) << "MB" << std::endl;
+	std::cout << "[Memory Pool] Total Malloc Mem Unit Size  : " << totalInjectedMemCnt * m_SerialBufferSize / 1024 << " KBytes" << std::endl;
 	std::cout << "----------------------------------------------------------" << std::endl;
 #endif
 
