@@ -17,10 +17,11 @@ public:
 		bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
 		UINT serialBufferSize, 
 #if defined(LOCKFREE_SEND_QUEUE)
-		uint32 sessionRecvBuffSize
+		uint32 sessionRecvBuffSize,
 #else
-		uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize
+		uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
 	)
 		: m_DBConnCnt(dbConnectionCnt), m_OdbcConnStr(odbcConnStr), 
 		CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
@@ -28,11 +29,12 @@ public:
 			tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
 			serialBufferSize,
 #if defined(LOCKFREE_SEND_QUEUE)
-			sessionRecvBuffSize
+			sessionRecvBuffSize,
 #else
-			sessionSendBuffSize, sessionRecvBuffSize
+			sessionSendBuffSize, sessionRecvBuffSize,
 #endif
-			)
+			protocolCode, packetKey
+		)
 	{
 		m_DBConnPool = new DBConnectionPool();
 

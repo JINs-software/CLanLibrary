@@ -181,7 +181,7 @@ UINT __stdcall CLanClient::CLanNetworkFunc(void* arg)
 				while (clanclient->m_RecvBufferFromCLanServer.GetUseSize() >= sizeof(stMSG_HDR)) {
 					stMSG_HDR hdr;
 					clanclient->m_RecvBufferFromCLanServer.Peek(&hdr);
-					if (hdr.code != dfPACKET_CODE) {
+					if (hdr.code != clanclient->m_ProtocolCode) {
 						DebugBreak();
 						return false;
 					}

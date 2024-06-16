@@ -14,7 +14,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 #else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
-	bool beNagle, bool zeroCopySend
+	BYTE protocolCode, BYTE packetKey
 )
 	: m_TotalAccept(0), m_AcceptThread(0), m_MaxOfRecvBufferSize(0), m_MaxOfBufferedSerialSendBufferCnt(0),
 	m_MaxOfSessions(maxOfConnections), m_Incremental(0),
@@ -27,7 +27,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag),
 	m_TlsMemPoolDefaultUnitCnt(tlsMemPoolDefaultUnitCnt), m_TlsMemPoolDefaultUnitCapacity(tlsMemPoolDefaultUnitCapacity),
 	m_SerialBufferSize(serialBufferSize),
-	m_Nagle(beNagle), m_ZeroCopySend(zeroCopySend)
+	m_ProtocolCode(protocolCode), m_PacketKey(packetKey)
 #else
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -36,7 +36,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 #else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
-	bool beNagle
+	BYTE protocolCode, BYTE packetKey
 )
 	: m_MaxOfSessions(maxOfConnections), m_Incremental(0), m_NumOfWorkerThreads(numOfWorkerThreads), m_StopFlag(false)
 #endif
@@ -1117,7 +1117,7 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 		//	  따라서 복사 비용이 들긴 하지만 Peek을 하는 것이 안전
 		stMSG_HDR hdr;
 		recvRingBuffer.Peek(&hdr);
-		if (hdr.code != dfPACKET_CODE) {
+		if (hdr.code != m_ProtocolCode) {
 #if defined(CLANSERVER_ASSERT)
 			DebugBreak();
 #endif
@@ -1155,14 +1155,36 @@ void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* p
 		payloadSum %= 256;
 	}
 	BYTE Pb = payloadSum ^ (randKey + 1);
-	BYTE Eb = Pb ^ (dfPACKET_KEY + 1);
+	BYTE Eb = Pb ^ (m_PacketKey + 1);
 	checkSum = Eb;
 
 	for (USHORT i = 1; i <= payloadLen; i++) {
 		//BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
 		//BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
 		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + i + 1);
-		BYTE En = Pn ^ (Eb + dfPACKET_KEY + i + 1);
+		BYTE En = Pn ^ (Eb + m_PacketKey + i + 1);
+
+		payloads[i - 1] = En;
+
+		Pb = Pn;
+		Eb = En;
+	}
+}
+void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads, BYTE packetKey) {
+	BYTE payloadSum = 0;
+	for (USHORT i = 0; i < payloadLen; i++) {
+		payloadSum += payloads[i];
+		payloadSum %= 256;
+	}
+	BYTE Pb = payloadSum ^ (randKey + 1);
+	BYTE Eb = Pb ^ (packetKey + 1);
+	checkSum = Eb;
+
+	for (USHORT i = 1; i <= payloadLen; i++) {
+		//BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
+		//BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + i + 1);
+		BYTE En = Pn ^ (Eb + packetKey + i + 1);
 
 		payloads[i - 1] = En;
 
@@ -1171,7 +1193,7 @@ void CLanServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* p
 	}
 }
 bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads) {
-	BYTE Pb = checkSum ^ (dfPACKET_KEY + 1);
+	BYTE Pb = checkSum ^ (m_PacketKey + 1);
 	BYTE payloadSum = Pb ^ (randKey + 1);
 	BYTE Eb = checkSum;
 	BYTE Pn;
@@ -1181,7 +1203,7 @@ bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* pa
 	for (USHORT i = 1; i <= payloadLen; i++) {
 		//Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
 		//Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
-		Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + i + 1);
+		Pn = payloads[i - 1] ^ (Eb + m_PacketKey + i + 1);
 		Dn = Pn ^ (Pb + randKey + i + 1);
 
 		Pb = Pn;
@@ -1205,7 +1227,7 @@ bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer&
 		return Decode(randKey, payloadLen, checkSum, ringPayloads.GetDequeueBufferPtr());
 	}
 	else {
-		BYTE Pb = checkSum ^ (dfPACKET_KEY + 1);
+		BYTE Pb = checkSum ^ (m_PacketKey + 1);
 		BYTE payloadSum = Pb ^ (randKey + 1);
 		BYTE Eb = checkSum;
 		BYTE Pn, Dn;
@@ -1217,7 +1239,7 @@ bool CLanServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer&
 			offset = offset % (ringPayloads.GetBufferSize() + 1);
 			//Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
 			//Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
-			Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + i + 1);
+			Pn = bytepayloads[offset] ^ (Eb + m_PacketKey + i + 1);
 			Dn = Pn ^ (Pb + randKey + i + 1);
 
 			Pb = Pn;

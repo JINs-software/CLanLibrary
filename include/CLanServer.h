@@ -155,8 +155,10 @@ class CLanServer
 	/*****************************************************************************************************************************
 	* CLanServer
 	*****************************************************************************************************************************/
+protected:
+	BYTE			m_ProtocolCode;
+	BYTE			m_PacketKey;
 private:
-
 	/////////////////////////////////
 	// Networking
 	/////////////////////////////////
@@ -241,7 +243,7 @@ public:
 #else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #endif
-		bool beNagle = true, bool zeroCopySend = false
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
 	);
 #else
 	CLanServer(const char* serverIP, UINT16 serverPort,
@@ -251,7 +253,7 @@ public:
 #else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #endif
-		bool beNagle = true
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
 	);
 #endif
 	~CLanServer();
@@ -428,6 +430,7 @@ private:
 																						// 공통 프로토콜 작업 수행 및 헤더 제거 후 페이로드로 OnRecv 호출
 public:
 	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
+	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads, BYTE packetKey);
 	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
 	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer& ringPayloads);
 	inline BYTE GetRandomKey() {
@@ -450,14 +453,25 @@ public:
 		msg->ClearBuffer();
 		return msg;
 	}
-	inline JBuffer* AllocSerialSendBuff(USHORT length) {
+	inline JBuffer* AllocSerialSendBuff(USHORT length, BYTE randKey = -1) {
 		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, m_SerialBufferSize);
 		msg->ClearBuffer();
 
 		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
-		hdr->code = dfPACKET_CODE;
+		hdr->code = m_ProtocolCode;
 		hdr->len = length;
-		hdr->randKey = (BYTE)(-1);	// Encode 전 송신 직렬화 버퍼 식별
+		hdr->randKey = randKey;	// Encode 전 송신 직렬화 버퍼 식별
+
+		return msg;
+	}
+	inline JBuffer* AllocSerialSendBuff(USHORT length, BYTE protocolCode, BYTE randKey = -1) {
+		JBuffer* msg = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, m_SerialBufferSize);
+		msg->ClearBuffer();
+
+		stMSG_HDR* hdr = msg->DirectReserve<stMSG_HDR>();
+		hdr->code = protocolCode;
+		hdr->len = length;
+		hdr->randKey = randKey;	// Encode 전 송신 직렬화 버퍼 식별
 
 		return msg;
 	}

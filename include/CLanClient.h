@@ -16,7 +16,7 @@ public:
 #else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #endif
-		bool beNagle = true
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
 	)
 		: CLanServer(serverIP, serverPort,numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
@@ -26,17 +26,19 @@ public:
 #else
 			sessionSendBuffSize, sessionRecvBuffSize,
 #endif
-			beNagle)
+			protocolCode, packetKey
+		)
 	{}
 #else
 	CLanClient(const char* serverIP, UINT16 serverPort,
 		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads, UINT16 maxOfConnections,
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
-		bool beNagle = true
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
 	)
 		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
 			sessionSendBuffSize, sessionRecvBuffSize,
-			beNagle)
+			protocolCode, packetKey
+		)
 	{}
 #endif
 
