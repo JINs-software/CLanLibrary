@@ -8,5 +8,6 @@
   <ItemGroup>
     <ClCompile Include="DBConnection.cpp" />
     <ClCompile Include="DBConnectionPool.cpp" />
+    <ClCompile Include="CLanOdbcServer.cpp" />
   </ItemGroup>
 </Project>
