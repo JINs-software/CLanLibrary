@@ -7,6 +7,7 @@ class CLanOdbcServer : public CLanServer
 private:
 	INT32						m_DBConnCnt;
 	DBConnectionPool*			m_DBConnPool;		// 서버 라이브러리에서 DBConnectionPool을 관리
+	bool						m_DBConnFlag;
 	const WCHAR*				m_OdbcConnStr;
 
 public:
@@ -23,7 +24,7 @@ public:
 #endif
 		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
 	)
-		: m_DBConnCnt(dbConnectionCnt), m_OdbcConnStr(odbcConnStr), 
+		: m_DBConnCnt(dbConnectionCnt), m_DBConnFlag(false), m_OdbcConnStr(odbcConnStr), 
 		CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity,
 			tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
@@ -35,19 +36,19 @@ public:
 #endif
 			protocolCode, packetKey
 		)
-	{
+	{}
+
+	bool Start() {
 		m_DBConnPool = new DBConnectionPool();
 
 		if (!m_DBConnPool->Connect(m_DBConnCnt, m_OdbcConnStr)) {
 			std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Fail!" << std::endl;
-			DebugBreak();
+			return false;
 		}
-		else {
-			std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Success!" << std::endl;
-		}
-	}
-
-	bool Start() {
+		
+		std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Success!" << std::endl;
+		m_DBConnFlag = true;
+		
 		if (!CLanServer::Start()) {
 			return false;	
 		}
@@ -55,8 +56,13 @@ public:
 		return true;
 	}
 	void Stop() {
-		m_DBConnPool->Clear();
-		CLanServer::Stop();
+		if (m_DBConnPool != NULL) {
+			m_DBConnPool->Clear();
+		}
+
+		if (m_DBConnFlag) {
+			CLanServer::Stop();
+		}
 	}
 
 protected:
@@ -93,6 +99,8 @@ protected:
 
 	bool ExecQuery(DBConnection* dbConn, const wchar_t* query);
 	bool FetchQuery(DBConnection* dbConn);
+	INT32 GetRowCount(DBConnection* dbConn);
+
 	/**************** 예시 ***************/
 	/*
 		dbConn = HoldDBConnection();				// DB 커넥션 획득
