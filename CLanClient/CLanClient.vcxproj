@@ -78,12 +78,12 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IncludePath>$(SolutionDir)include;$(IncludePath)</IncludePath>
-    <ExternalIncludePath>$(SolutionDir)..\0. ServerNetwork\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\LockFree\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <ExternalIncludePath>$(SolutionDir)..\ServerNetwork\include;$(SolutionDir)..\RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\LockFree\include;$(ExternalIncludePath)</ExternalIncludePath>
     <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(SolutionDir)include;$(IncludePath)</IncludePath>
-    <ExternalIncludePath>$(SolutionDir)..\0. ServerNetwork\include;$(SolutionDir)..\2. RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\LockFree\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <ExternalIncludePath>$(SolutionDir)..\ServerNetwork\include;$(SolutionDir)..\RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\LockFree\include;$(ExternalIncludePath)</ExternalIncludePath>
     <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
