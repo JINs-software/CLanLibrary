@@ -4,6 +4,8 @@
 
 bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
 {
+	SQLRETURN ret;
+
 	// 1. 전달받은 SQL 환경 핸들을 바탕으로 실제 커넥션 핸들을 할당받는다.
 	if (::SQLAllocHandle(SQL_HANDLE_DBC, henv, &m_DBConnection) != SQL_SUCCESS)
 		return false;
@@ -15,7 +17,7 @@ bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
 	WCHAR resultString[MAX_PATH] = { 0 };
 	SQLSMALLINT resultStringLen = 0;
 
-	SQLRETURN ret = ::SQLDriverConnectW(	// WCHAR 문자열 전용 연결 함수 호출
+	ret = ::SQLDriverConnectW(	// WCHAR 문자열 전용 연결 함수 호출
 		m_DBConnection,
 		NULL,
 		reinterpret_cast<SQLWCHAR*>(stringBuffer),
@@ -28,7 +30,8 @@ bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
 
 	if (!(ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)) {
 		std::wcout << L"SQLDriverConnectW return Fail.. (result string: " << resultString << L")" <<std::endl;
-		HandleError(ret);
+		HandleError(ret, SQL_HANDLE_DBC, m_DBConnection);
+
 		return false;
 	}
 
@@ -297,8 +300,59 @@ void DBConnection::HandleError(SQLRETURN ret, SQLSMALLINT errMsgBuffLen, SQLWCHA
 		// 에러가 없거나, 성공이 였다면 루프 탈출
 		if (errorRet == SQL_NO_DATA)
 			break;
+		if (errorRet == SQL_SUCCESS || errorRet == SQL_SUCCESS_WITH_INFO)
+			break;
+
+		if (errMsgBuffLen >= errMsgOffset + msgLen + 1) {
+			if (errMsgOut != NULL) {
+				std::wcout.imbue(std::locale("kor"));
+				memcpy(&errMsgOut[errMsgOffset], errMsg, msgLen);
+				errMsgOut[errMsgOffset + msgLen] = NULL;
+				errMsgOffset += (msgLen + 1);
+			}
+		}
+
+		index++;
+	}
+}
+
+void DBConnection::HandleError(SQLRETURN ret, SQLSMALLINT hType, SQLHANDLE handle, SQLSMALLINT errMsgBuffLen, SQLWCHAR* errMsgOut, SQLSMALLINT* errMsgLenOut)
+{
+	if (ret == SQL_SUCCESS)
+		return;
+
+	SQLSMALLINT index = 1;
+	SQLWCHAR sqlState[MAX_PATH] = { 0 };
+	SQLINTEGER nativeErr = 0;
+	SQLWCHAR errMsg[MAX_PATH] = { 0 };		// 에러 사유 저장
+	SQLSMALLINT msgLen = 0;
+	SQLRETURN errorRet = 0;
+
+	SQLSMALLINT errMsgOffset = 0;
+	if (errMsgLenOut != NULL) {
+		*errMsgLenOut = 0;
+	}
+
+	while (true)
+	{
+		errorRet = ::SQLGetDiagRecW(	// 에러 메시지 추출 함수
+			hType,
+			handle,
+			index,
+			sqlState,
+			OUT & nativeErr,
+			errMsg,
+			_countof(errMsg),
+			OUT & msgLen
+		);
+
+		// 에러가 없거나, 성공이 였다면 루프 탈출
+		if (errorRet == SQL_NO_DATA)
+			break;
 		if (errorRet != SQL_SUCCESS && errorRet != SQL_SUCCESS_WITH_INFO)
 			break;
+
+		std::wcout << errMsg << std::endl;
 
 		if (errMsgBuffLen >= errMsgOffset + msgLen + 1) {
 			if (errMsgOut != NULL) {

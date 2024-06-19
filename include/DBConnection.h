@@ -20,6 +20,7 @@ private:
 	// API에 인수를 전달하거나, 출력 인수로 데이터를 받을 수 있는 "상태"로 해석
 	SQLHSTMT		m_Statement = SQL_NULL_HANDLE;
 
+
 public:
 	DBConnection() {}
 	~DBConnection() {
@@ -86,5 +87,6 @@ public:
 
 private:
 	void			HandleError(SQLRETURN ret, SQLSMALLINT errMsgBuffLen = 0, SQLWCHAR* errMsgOut = NULL, SQLSMALLINT* errMsgLenOut = NULL);
+	void			HandleError(SQLRETURN ret, SQLSMALLINT hType, SQLHANDLE handle, SQLSMALLINT errMsgBuffLen = 0, SQLWCHAR* errMsgOut = NULL, SQLSMALLINT* errMsgLenOut = NULL);
 };
 
