@@ -107,6 +107,9 @@ bool CLanServer::Start()
 		return false;
 	}
 	// 리슨 소켓 Accept 준비
+	// 24.06.21
+	// 로그인-채팅 더미 시 Connect Fail 다수 발생
+	// SOMAXCONN으로만 설정 시 백로그 큐는 200, SOMAXCONN_HINT을 통해 백로그 큐 확대
 	if (ListenSocket(m_ListenSock, SOMAXCONN_HINT(65535)) == SOCKET_ERROR) {
 		return false;
 	}
