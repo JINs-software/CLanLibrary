@@ -83,7 +83,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(SolutionDir)include;$(IncludePath)</IncludePath>
-    <ExternalIncludePath>$(SolutionDir)..\ServerNetwork\include;$(SolutionDir)..\RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\LockFree\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <ExternalIncludePath>$(SolutionDir)..\RingBuffer\include;$(SolutionDir)..\MemoryPool\include;$(SolutionDir)..\LockFree\include;$(ExternalIncludePath)</ExternalIncludePath>
     <OutDir>$(SolutionDir)lib\$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

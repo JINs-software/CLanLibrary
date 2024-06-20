@@ -4,7 +4,7 @@ bool CLanClient::InitLanClient(const CHAR* clanServerIP, USHORT clanserverPort)
 {
 	m_CLanClientSock = CreateWindowSocket_IPv4(true);
 	SOCKADDR_IN serverAddr = CreateDestinationADDR(clanServerIP, clanserverPort);
-	if (!ConnectSocketTry(m_CLanClientSock, serverAddr)) {
+	if (!ConnectToDestination(m_CLanClientSock, serverAddr)) {
 		return false;
 	}
 
