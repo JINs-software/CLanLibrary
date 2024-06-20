@@ -13,57 +13,20 @@ private:
 public:
 	CLanOdbcServer(int32 dbConnectionCnt, const WCHAR* odbcConnStr,
 		const char* serverIP, uint16 serverPort,
-		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections, 
+		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 		size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultUnitCapacity,
 		bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
-		UINT serialBufferSize, 
+		UINT serialBufferSize,
 #if defined(LOCKFREE_SEND_QUEUE)
 		uint32 sessionRecvBuffSize,
 #else
 		uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
 		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
-	)
-		: m_DBConnCnt(dbConnectionCnt), m_DBConnFlag(false), m_OdbcConnStr(odbcConnStr), 
-		CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
-			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity,
-			tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
-			serialBufferSize,
-#if defined(LOCKFREE_SEND_QUEUE)
-			sessionRecvBuffSize,
-#else
-			sessionSendBuffSize, sessionRecvBuffSize,
-#endif
-			protocolCode, packetKey
-		)
-	{}
+	);
 
-	bool Start() {
-		m_DBConnPool = new DBConnectionPool();
-
-		if (!m_DBConnPool->Connect(m_DBConnCnt, m_OdbcConnStr)) {
-			std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Fail!" << std::endl;
-			return false;
-		}
-		
-		std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Success!" << std::endl;
-		m_DBConnFlag = true;
-		
-		if (!CLanServer::Start()) {
-			return false;	
-		}
-
-		return true;
-	}
-	void Stop() {
-		if (m_DBConnPool != NULL) {
-			m_DBConnPool->Clear();
-		}
-
-		if (m_DBConnFlag) {
-			CLanServer::Stop();
-		}
-	}
+	bool Start();
+	void Stop();
 
 protected:
 	// 생성된 DB 커넥션 중 하나의 커넥션을 베타적으로 획득,	NULL 반환 시 획득 가능 DBConnection 없음 (pool size: 0)
