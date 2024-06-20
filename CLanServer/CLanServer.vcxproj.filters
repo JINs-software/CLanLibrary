@@ -7,5 +7,22 @@
     <ClInclude Include="..\include\CLanServer.h" />
     <ClInclude Include="..\include\CLanServerConfig.h" />
     <ClInclude Include="..\include\CommonProtocol.h" />
+    <ClInclude Include="..\include\CommStructs.h">
+      <Filter>CommHdr</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\CommTypes.h">
+      <Filter>CommHdr</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\WInSocketAPI.h">
+      <Filter>WinSocketAPI</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CommHdr">
+      <UniqueIdentifier>{156986ec-862e-4d2d-92c0-17d007288efd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="WinSocketAPI">
+      <UniqueIdentifier>{ae67283f-3219-45f7-8298-13f467f28834}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

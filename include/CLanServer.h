@@ -1,5 +1,7 @@
 #pragma once
-#include "SocketUtil.h"
+#include "WInSocketAPI.h"
+#include "CommStructs.h"
+
 #include <assert.h>
 
 #define JBUFF_DIRPTR_MANUAL_RESET
@@ -326,27 +328,27 @@ protected:
 	//		 False 반환 시 생성된 생성된 스레드 종료	
 	// Desc: 생성자에 전달한 IOCP 작업자 스레드 생성 갯수와 별개로 해당 함수의 구현부에서 IOCP 작업자 스레드 갯수 제어
 	//		또한 작업자 스레드의 수행 전 필요한 초기화 작업 수행(시점 상 OnWorkerThreadStart 호출 전)
-	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; };		
+	virtual bool OnWorkerThreadCreate(HANDLE thHnd) { return true; }
 
 	/////////////////////////////////////////////////////////////////
 	// OnWorkerThreadCreateDone
 	/////////////////////////////////////////////////////////////////
 	// 호출 시점: CLanServer::Start에서 모든 IOCP 작업자 스레드 생성을 마친 후
-	virtual void OnWorkerThreadCreateDone() {};
+	virtual void OnWorkerThreadCreateDone() {}
 		
 	/////////////////////////////////////////////////////////////////
 	// OnWorkerThreadStart
 	/////////////////////////////////////////////////////////////////
 	// 호출 시점: 개별 IOCP 작업자 스레드가 수행하는 WorkerThreadFunc의 함수 초입부(GQCS가 포함된 작업 반복문 이전)
 	// Desc: 개별 스레드가 초기에 설정하는 작업 수행(ex, Thread Local Storage 관련 초기화)
-	virtual void OnWorkerThreadStart() {};	
+	virtual void OnWorkerThreadStart() {}
 
 	/////////////////////////////////////////////////////////////////
 	// OnWorkerThreadEnd
 	/////////////////////////////////////////////////////////////////
 	// 호출 시점: 개별 IOCP 작업자 스레드가 종료(작업자 함수 return) 전
 	// Desc: 스레드 별 필요한 정리 작업 수행
-	virtual void OnWorkerThreadEnd() {};
+	virtual void OnWorkerThreadEnd() { std::cout << "IOCP Worker Thread Exits.."; }
 
 	virtual bool OnConnectionRequest(/*IP, Port*/) {
 		bool ret = true;

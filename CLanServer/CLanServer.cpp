@@ -4,6 +4,8 @@
 #include <fstream>
 #include <cstdlib> // system 함수를 사용하기 위해 필요
 
+#include "..\WinSocketAPI\WinSocketAPI.cpp"
+
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -48,7 +50,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	InitWindowSocketLib(&wsadata);
 	m_ListenSock = CreateWindowSocket_IPv4(true);
 	if (serverIP == nullptr) {
-		m_ListenSockAddr = CreateServerADDR(serverPort);
+		m_ListenSockAddr = CreateServerADDR_ANY(serverPort);
 	}
 	else {
 		m_ListenSockAddr = CreateServerADDR(serverIP, serverPort);
@@ -105,7 +107,7 @@ bool CLanServer::Start()
 		return false;
 	}
 	// 리슨 소켓 Accept 준비
-	if (ListenSocket(m_ListenSock, SOMAXCONN) == SOCKET_ERROR) {
+	if (ListenSocket(m_ListenSock, SOMAXCONN_HINT(65535)) == SOCKET_ERROR) {
 		return false;
 	}
 
@@ -152,6 +154,8 @@ bool CLanServer::Start()
 
 	// 모든 스레드가 생성된 후 호출, 생성된 스레드는 작업 중...
 	OnWorkerThreadCreateDone();
+
+	return true;
 }
 
 void CLanServer::Stop()
@@ -1038,13 +1042,15 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 #endif
 			}
 		}
-#if defined(CLANSERVER_ASSERT)
 		else {
 			// 1. IOCP 객체 자체의 문제
 			// 2. GQCS 호출 시 INIFINTE 외 대기 시간을 걸어 놓은 경우, 대기 시간 내 I/O가 완료되지 않은 경우
-			DebugBreak();
+			//DebugBreak();
+
+			// Stop 호출 -> PostQueuedCompletionStatus(m_IOCP, 0, 0, NULL);
+			// 작업자 스레드 종료 
+			break;
 		}
-#endif
 	}
 
 	clanserver->OnWorkerThreadEnd();
