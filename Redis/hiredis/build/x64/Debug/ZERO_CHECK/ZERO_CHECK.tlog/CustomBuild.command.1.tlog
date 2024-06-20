@@ -1,0 +1,10 @@
+^C:\USERS\HURJIN\0. GAMESERVERSTUDY\1. PROJECT\LOGINSERVER\REDIS\HIREDIS\BUILD\CMAKEFILES\DB309E79F63E98BA54FCE7C6A9EE40F7\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" "-SC:/Users/HurJin/0. GameServerStudy/1. Project/LoginServer/Redis/hiredis" "-BC:/Users/HurJin/0. GameServerStudy/1. Project/LoginServer/Redis/hiredis/build" --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file "C:/Users/HurJin/0. GameServerStudy/1. Project/LoginServer/Redis/hiredis/build/hiredis.sln"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

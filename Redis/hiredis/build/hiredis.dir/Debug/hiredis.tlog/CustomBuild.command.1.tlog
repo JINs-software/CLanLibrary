@@ -1,0 +1,10 @@
+^C:\USERS\HURJIN\0. GAMESERVERSTUDY\1. PROJECT\LOGINSERVER\REDIS\HIREDIS\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" "-SC:/Users/HurJin/0. GameServerStudy/1. Project/LoginServer/Redis/hiredis" "-BC:/Users/HurJin/0. GameServerStudy/1. Project/LoginServer/Redis/hiredis/build" --check-stamp-file "C:/Users/HurJin/0. GameServerStudy/1. Project/LoginServer/Redis/hiredis/build/CMakeFiles/generate.stamp"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\HurJin\0. GameServerStudy\1. Project\LoginServer\Redis\hiredis\build\CMakeFiles\db309e79f63e98ba54fce7c6a9ee40f7\RUN_TESTS_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{68B97869-3FE9-32AB-BDB0-369D661E28FC}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
