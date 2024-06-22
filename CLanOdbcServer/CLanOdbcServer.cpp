@@ -11,7 +11,8 @@ CLanOdbcServer::CLanOdbcServer(int32 dbConnectionCnt, const WCHAR* odbcConnStr,
 #else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
-	BYTE protocolCode, BYTE packetKey
+	BYTE protocolCode, BYTE packetKey,
+	bool recvBufferingMode
 ) 
 	: m_DBConnCnt(dbConnectionCnt), m_DBConnFlag(false), m_OdbcConnStr(odbcConnStr),
 		CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
@@ -23,7 +24,8 @@ CLanOdbcServer::CLanOdbcServer(int32 dbConnectionCnt, const WCHAR* odbcConnStr,
 #else
 				sessionSendBuffSize, sessionRecvBuffSize,
 #endif
-				protocolCode, packetKey
+				protocolCode, packetKey,
+				recvBufferingMode
 		)
 {}
 

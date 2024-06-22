@@ -22,7 +22,8 @@ public:
 #else
 		uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
-		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY,
+		bool recvBufferingMode = false
 	);
 
 	bool Start();
