@@ -16,7 +16,8 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 #else
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
-	BYTE protocolCode, BYTE packetKey
+	BYTE protocolCode, BYTE packetKey,
+	bool recvBufferingMode
 )
 	: m_TotalAccept(0), m_AcceptThread(0), m_MaxOfRecvBufferSize(0), m_MaxOfBufferedSerialSendBufferCnt(0),
 	m_MaxOfSessions(maxOfConnections), m_Incremental(0),
@@ -29,7 +30,8 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag),
 	m_TlsMemPoolDefaultUnitCnt(tlsMemPoolDefaultUnitCnt), m_TlsMemPoolDefaultUnitCapacity(tlsMemPoolDefaultUnitCapacity),
 	m_SerialBufferSize(serialBufferSize),
-	m_ProtocolCode(protocolCode), m_PacketKey(packetKey)
+	m_ProtocolCode(protocolCode), m_PacketKey(packetKey),
+	m_RecvBufferingMode(recvBufferingMode)
 #else
 CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 	DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -1093,66 +1095,65 @@ UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
 
 bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer)
 {
-#if defined(ON_RECV_BUFFERING)
-	std::queue<JBuffer> bufferedQueue;
-	size_t recvDataLen = 0;
-	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
-		//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
-		// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
-		//	  따라서 복사 비용이 들긴 하지만 Peek을 하는 것이 안전
-		stMSG_HDR hdr;
-		recvRingBuffer.Peek(&hdr);
-		if (hdr.code != dfPACKET_CODE) {
-			DebugBreak();
-			return false;
-		}
-		if (recvRingBuffer.GetUseSize() < sizeof(stMSG_HDR) + hdr.len) {
-			break;
-		}
-		recvRingBuffer.DirectMoveDequeueOffset(sizeof(stMSG_HDR));
+	if (m_RecvBufferingMode) {
+		JSerialBuffer jserialBuff;
+		while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
+			//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
+			// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
+			//	  따라서 복사 비용이 들긴 하지만 Peek을 하는 것이 안전
+			stMSG_HDR hdr;
+			recvRingBuffer.Peek(&hdr);
+			if (hdr.code != dfPACKET_CODE) {
+				DebugBreak();
+				return false;
+			}
+			if (recvRingBuffer.GetUseSize() < sizeof(stMSG_HDR) + hdr.len) {
+				break;
+			}
+			recvRingBuffer.DirectMoveDequeueOffset(sizeof(stMSG_HDR));
 
-		if (!Decode(hdr.randKey, hdr.len, hdr.checkSum, recvRingBuffer)) {
-			DebugBreak();
-			return false;
-		}
+			if (!Decode(hdr.randKey, hdr.len, hdr.checkSum, recvRingBuffer)) {
+				DebugBreak();
+				return false;
+			}
 
-		JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
-		bufferedQueue.push(recvBuff);
-		recvDataLen += hdr.len;
-		recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
+			jserialBuff.Insert(recvRingBuffer, hdr.len, true);
+			recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
+		}
+		OnRecv(sessionID, jserialBuff);
 	}
-	OnRecv(sessionID, bufferedQueue, recvDataLen);
-#else
-	while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
-		//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
-		// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
-		//	  따라서 복사 비용이 들긴 하지만 Peek을 하는 것이 안전
-		stMSG_HDR hdr;
-		recvRingBuffer.Peek(&hdr);
-		if (hdr.code != m_ProtocolCode) {
+	else {
+		while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
+			//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
+			// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
+			//	  따라서 복사 비용이 들긴 하지만 Peek을 하는 것이 안전
+			stMSG_HDR hdr;
+			recvRingBuffer.Peek(&hdr);
+			if (hdr.code != m_ProtocolCode) {
 #if defined(CLANSERVER_ASSERT)
-			DebugBreak();
+				DebugBreak();
 #endif
-			return false;
-		}
-		if (recvRingBuffer.GetUseSize() < sizeof(stMSG_HDR) + hdr.len) {
-			break;
-		}
-		recvRingBuffer.DirectMoveDequeueOffset(sizeof(stMSG_HDR));
+				return false;
+			}
+			if (recvRingBuffer.GetUseSize() < sizeof(stMSG_HDR) + hdr.len) {
+				break;
+			}
+			recvRingBuffer.DirectMoveDequeueOffset(sizeof(stMSG_HDR));
 
-		if (!Decode(hdr.randKey, hdr.len, hdr.checkSum, recvRingBuffer)) {
+			if (!Decode(hdr.randKey, hdr.len, hdr.checkSum, recvRingBuffer)) {
 #if defined(CLANSERVER_ASSERT)
-			DebugBreak();
+				DebugBreak();
 #endif
-			return false;
+				return false;
+			}
+
+			JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
+			OnRecv(sessionID, recvBuff);
+
+			recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
 		}
-
-		JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
-		OnRecv(sessionID, recvBuff);
-
-		recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
 	}
-#endif
+
 	if (recvRingBuffer.GetUseSize() == 0) {
 		recvRingBuffer.ClearBuffer();
 	}
