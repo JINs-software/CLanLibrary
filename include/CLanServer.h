@@ -171,6 +171,8 @@ private:
 	UINT			m_MaxOfRecvBufferSize;
 	LONG			m_MaxOfBufferedSerialSendBufferCnt;
 
+	bool			m_RecvBufferingMode;
+
 	/////////////////////////////////
 	// [TO DO]
 	bool m_Nagle;				// 네이글 작동 변경 미반영
@@ -245,7 +247,8 @@ public:
 #else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #endif
-		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY,
+		bool recvBufferingMode = false
 	);
 #else
 	CLanServer(const char* serverIP, UINT16 serverPort,
@@ -294,6 +297,10 @@ public:
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	void SendBufferedPacket(uint64 sessionID, bool postToWorker = false);
 
+	inline TlsMemPoolManager<JBuffer>* GetTlsMemPoolManager() {
+		return &m_SerialBuffPoolMgr;
+	}
+
 private:
 	stCLanSession* AcquireSession(uint64 sessionID);			// called by SendPacket, BufferedSendPacket, SendBufferedPacket
 	void ReturnSession(stCLanSession* session);					//						"   "
@@ -312,7 +319,7 @@ private:
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
 	static UINT	__stdcall CalcTpsThreadFunc(void* arg);
 #endif
-		
+
 protected:
 	/////////////////////////////////////////////////////////////////
 	// OnBeforeCreateThread
@@ -418,15 +425,8 @@ protected:
 #endif
 
 	virtual void OnClientLeave(UINT64 sessionID) = 0;
-
-#if defined(ON_RECV_BUFFERING)
-	// 수신 패킷을 버퍼링하여 bufferedQueue를 통해 전달
-	// OnRecv 호출 횟수를 줄이기 위한 시도
-	virtual void OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue, size_t recvDataLen) = 0;
-#else
-	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) = 0;
-#endif
-
+	virtual void OnRecv(UINT64 sessionID, JSerialBuffer& recvBuff) { DebugBreak(); /* have to override */ }
+	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) { DebugBreak(); /* have to override */ }
 	virtual void OnError() {};
 
 
