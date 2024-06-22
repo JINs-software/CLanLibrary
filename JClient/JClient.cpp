@@ -2,6 +2,119 @@
 
 #define CLIENT_WSABUF_ARRAY_DEFAULT_SIZE	100
 
+void JClient::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads) {
+	BYTE payloadSum = 0;
+	for (USHORT i = 0; i < payloadLen; i++) {
+		payloadSum += payloads[i];
+		payloadSum %= 256;
+	}
+	BYTE Pb = payloadSum ^ (randKey + 1);
+	BYTE Eb = Pb ^ (m_PacketKey + 1);
+	checkSum = Eb;
+
+	for (USHORT i = 1; i <= payloadLen; i++) {
+		//BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
+		//BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + i + 1);
+		BYTE En = Pn ^ (Eb + m_PacketKey + i + 1);
+
+		payloads[i - 1] = En;
+
+		Pb = Pn;
+		Eb = En;
+	}
+}
+void JClient::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads, BYTE packetKey) {
+	BYTE payloadSum = 0;
+	for (USHORT i = 0; i < payloadLen; i++) {
+		payloadSum += payloads[i];
+		payloadSum %= 256;
+	}
+	BYTE Pb = payloadSum ^ (randKey + 1);
+	BYTE Eb = Pb ^ (packetKey + 1);
+	checkSum = Eb;
+
+	for (USHORT i = 1; i <= payloadLen; i++) {
+		//BYTE Pn = payloads[i - 1] ^ (Pb + randKey + (BYTE)(i + 1));
+		//BYTE En = Pn ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		BYTE Pn = payloads[i - 1] ^ (Pb + randKey + i + 1);
+		BYTE En = Pn ^ (Eb + packetKey + i + 1);
+
+		payloads[i - 1] = En;
+
+		Pb = Pn;
+		Eb = En;
+	}
+}
+bool JClient::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads) {
+	BYTE Pb = checkSum ^ (m_PacketKey + 1);
+	BYTE payloadSum = Pb ^ (randKey + 1);
+	BYTE Eb = checkSum;
+	BYTE Pn;
+	BYTE Dn;
+	BYTE payloadSumCmp = 0;
+
+	for (USHORT i = 1; i <= payloadLen; i++) {
+		//Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		//Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+		Pn = payloads[i - 1] ^ (Eb + m_PacketKey + i + 1);
+		Dn = Pn ^ (Pb + randKey + i + 1);
+
+		Pb = Pn;
+		Eb = payloads[i - 1];
+		payloads[i - 1] = Dn;
+		payloadSumCmp += payloads[i - 1];
+		payloadSumCmp %= 256;
+	}
+
+	if (payloadSum != payloadSumCmp) {
+#if defined(CLANSERVER_ASSERT)
+		DebugBreak();
+#endif
+		return false;
+	}
+
+	return true;
+}
+bool JClient::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, JBuffer& ringPayloads) {
+	if (ringPayloads.GetDirectDequeueSize() >= payloadLen) {
+		return Decode(randKey, payloadLen, checkSum, ringPayloads.GetDequeueBufferPtr());
+	}
+	else {
+		BYTE Pb = checkSum ^ (m_PacketKey + 1);
+		BYTE payloadSum = Pb ^ (randKey + 1);
+		BYTE Eb = checkSum;
+		BYTE Pn, Dn;
+		BYTE payloadSumCmp = 0;
+
+		UINT offset = ringPayloads.GetDeqOffset();
+		BYTE* bytepayloads = ringPayloads.GetBeginBufferPtr();
+		for (USHORT i = 1; i <= payloadLen; i++, offset++) {
+			offset = offset % (ringPayloads.GetBufferSize() + 1);
+			//Pn = bytepayloads[offset] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+			//Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+			Pn = bytepayloads[offset] ^ (Eb + m_PacketKey + i + 1);
+			Dn = Pn ^ (Pb + randKey + i + 1);
+
+			Pb = Pn;
+			Eb = bytepayloads[offset];
+			bytepayloads[offset] = Dn;
+			payloadSumCmp += bytepayloads[offset];
+			payloadSumCmp %= 256;
+		}
+
+		if (payloadSum != payloadSumCmp) {
+#if defined(CLANSERVER_ASSERT)
+			DebugBreak();
+#endif
+			return false;
+		}
+
+		return true;
+	}
+}
+
+
 bool JClient::InitClient(const CHAR* clanServerIP, USHORT clanserverPort)
 {
 	m_ClientSock = CreateWindowSocket_IPv4(true);
