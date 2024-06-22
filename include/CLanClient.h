@@ -16,7 +16,8 @@ public:
 #else
 		uint32 sessionSendBuffSize = SESSION_SEND_BUFFER_DEFAULT_SIZE, uint32 sessionRecvBuffSize = SESSION_RECV_BUFFER_DEFAULT_SIZE,
 #endif
-		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY,
+		bool recvBufferingMode = false
 	)
 		: CLanServer(serverIP, serverPort,numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
@@ -26,7 +27,8 @@ public:
 #else
 			sessionSendBuffSize, sessionRecvBuffSize,
 #endif
-			protocolCode, packetKey
+			protocolCode, packetKey,
+			recvBufferingMode
 		)
 	{}
 #else

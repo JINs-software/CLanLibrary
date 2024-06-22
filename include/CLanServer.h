@@ -157,84 +157,6 @@ class CLanServer
 	/*****************************************************************************************************************************
 	* CLanServer
 	*****************************************************************************************************************************/
-protected:
-	BYTE			m_ProtocolCode;
-	BYTE			m_PacketKey;
-private:
-	/////////////////////////////////
-	// Networking
-	/////////////////////////////////
-	SOCKET			m_ListenSock;			// Listen Sock
-	SOCKADDR_IN		m_ListenSockAddr;
-	UINT64			m_TotalAccept;
-	USHORT			m_AcceptTransaction;
-	UINT			m_MaxOfRecvBufferSize;
-	LONG			m_MaxOfBufferedSerialSendBufferCnt;
-
-	bool			m_RecvBufferingMode;
-
-	/////////////////////////////////
-	// [TO DO]
-	bool m_Nagle;				// 네이글 작동 변경 미반영
-	bool m_ZeroCopySend;		// 제로-카피 미반영
-	/////////////////////////////////
-
-	/////////////////////////////////
-	// Session
-	/////////////////////////////////
-	UINT16					m_MaxOfSessions;
-	queue<UINT16>			m_SessionAllocIdQueue;		// 1 ~ m_MaxOfSessions 세션 할당 인덱스 큐
-														// (인덱스 0은 없음)
-	CRITICAL_SECTION		m_SessionAllocIdQueueCS;	// AcceptThread'Pop(세션 인덱스 할당), WorkerThreads'Push(세션 삭제 시 인덱스 반환)
-														// => 동기화 객체 필요
-
-	uint64					m_Incremental;				// 세션 ID 증분 파트 할당 값, 세션 생성 시마다 증가 수행 (단일 Accept 스레드가 증분, 원자적 여난 불필요)
-
-	vector<stCLanSession*>	m_Sessions;					// 벡터 인덱스 == 세션 ID 인덱스인 세션 구조체 관리 벡터
-#if !defined(LOCKFREE_SEND_QUEUE)
-	uint32 m_SessionSendBufferSize;
-#endif
-	uint32 m_SessionRecvBufferSize;
-
-	/////////////////////////////////
-	// IOCP
-	/////////////////////////////////
-	HANDLE m_IOCP;
-
-	/////////////////////////////////
-	// Exit
-	/////////////////////////////////
-	bool m_StopFlag;	// Stop(정지 및 정리 함수) 미호출 시,
-						// 소멸자에서 호출되도록 하기 위한 제어 변수
-
-	/////////////////////////////////
-	// Threads
-	/////////////////////////////////
-	// 1. Accept Thread(single)
-	HANDLE				m_AcceptThread;
-
-	// 2. IOCP Worker Thread(multi)
-	UINT16				m_NumOfWorkerThreads;		// 생성자를 통해 설정, 0 전달 시 GetSystemInfo 호출을 통해 가용 CPU 갯수로 설정
-	vector<HANDLE>		m_WorkerThreads;
-	vector<DWORD>		m_WorkerThreadIDs;
-	map<DWORD, bool>	m_WorkerThreadStartFlag;	// 작업자 스레드 생성 시 OnWorkerThreadCreate 호출
-													// TRUE 반환 시 { 작업자 스레드 ID, TRUE } insert
-													// FALSE 반환 시  { 작업자 스레드 ID, FALSE } insert
-													// 작업자 스레드 함수 도입부에서 TRUE/FALSE 여부 확인, FALSE 시 작업 수행 없이 RETURN
-
-#if defined(ALLOC_BY_TLS_MEM_POOL)
-	/////////////////////////////////
-	// Memory Pool
-	/////////////////////////////////
-public:
-	TlsMemPoolManager<JBuffer>	m_SerialBuffPoolMgr;				// CLanServer 직렬화 버퍼 메모리 풀 관리자
-
-	size_t						m_TlsMemPoolDefaultUnitCnt;			// tlsMemPool 기본 할당 메모리 객체 갯수
-	size_t						m_TlsMemPoolDefaultUnitCapacity;	// tlsMemPool 최대 메모리 객체 관리 갯수
-	UINT						m_SerialBufferSize;					// m_SerialBuffPoolMgr을 통해 생성된 tlsMemPool로 부터 할당받는 직렬화 버퍼 크기
-																	// (서버에서 할당받아 사용되는 직렬화 버퍼 저장 데이터 중 가장 큰 값으로 지정 필요)
-#endif
-
 public:
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	CLanServer(const char* serverIP, uint16 serverPort,
@@ -535,7 +457,89 @@ public:
 	// CLanServer 관련 정보 콘솔 창 로그 함수
 	void ConsoleLog();
 	virtual void ServerConsoleLog() {}	// called by ConsoleLog
-	
+
+
+
+
+
+protected:
+		BYTE			m_ProtocolCode;
+		BYTE			m_PacketKey;
+private:
+	/////////////////////////////////
+	// Networking
+	/////////////////////////////////
+	SOCKET			m_ListenSock;			// Listen Sock
+	SOCKADDR_IN		m_ListenSockAddr;
+	UINT64			m_TotalAccept;
+	USHORT			m_AcceptTransaction;
+	UINT			m_MaxOfRecvBufferSize;
+	LONG			m_MaxOfBufferedSerialSendBufferCnt;
+
+	bool			m_RecvBufferingMode;
+
+	/////////////////////////////////
+	// [TO DO]
+	bool m_Nagle;				// 네이글 작동 변경 미반영
+	bool m_ZeroCopySend;		// 제로-카피 미반영
+	/////////////////////////////////
+
+	/////////////////////////////////
+	// Session
+	/////////////////////////////////
+	UINT16					m_MaxOfSessions;
+	queue<UINT16>			m_SessionAllocIdQueue;		// 1 ~ m_MaxOfSessions 세션 할당 인덱스 큐
+	// (인덱스 0은 없음)
+	CRITICAL_SECTION		m_SessionAllocIdQueueCS;	// AcceptThread'Pop(세션 인덱스 할당), WorkerThreads'Push(세션 삭제 시 인덱스 반환)
+	// => 동기화 객체 필요
+
+	uint64					m_Incremental;				// 세션 ID 증분 파트 할당 값, 세션 생성 시마다 증가 수행 (단일 Accept 스레드가 증분, 원자적 여난 불필요)
+
+	vector<stCLanSession*>	m_Sessions;					// 벡터 인덱스 == 세션 ID 인덱스인 세션 구조체 관리 벡터
+#if !defined(LOCKFREE_SEND_QUEUE)
+	uint32 m_SessionSendBufferSize;
+#endif
+	uint32 m_SessionRecvBufferSize;
+
+	/////////////////////////////////
+	// IOCP
+	/////////////////////////////////
+	HANDLE m_IOCP;
+
+	/////////////////////////////////
+	// Exit
+	/////////////////////////////////
+	bool m_StopFlag;	// Stop(정지 및 정리 함수) 미호출 시,
+	// 소멸자에서 호출되도록 하기 위한 제어 변수
+
+/////////////////////////////////
+// Threads
+/////////////////////////////////
+// 1. Accept Thread(single)
+	HANDLE				m_AcceptThread;
+
+	// 2. IOCP Worker Thread(multi)
+	UINT16				m_NumOfWorkerThreads;		// 생성자를 통해 설정, 0 전달 시 GetSystemInfo 호출을 통해 가용 CPU 갯수로 설정
+	vector<HANDLE>		m_WorkerThreads;
+	vector<DWORD>		m_WorkerThreadIDs;
+	map<DWORD, bool>	m_WorkerThreadStartFlag;	// 작업자 스레드 생성 시 OnWorkerThreadCreate 호출
+	// TRUE 반환 시 { 작업자 스레드 ID, TRUE } insert
+	// FALSE 반환 시  { 작업자 스레드 ID, FALSE } insert
+	// 작업자 스레드 함수 도입부에서 TRUE/FALSE 여부 확인, FALSE 시 작업 수행 없이 RETURN
+
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	/////////////////////////////////
+	// Memory Pool
+	/////////////////////////////////
+public:
+	TlsMemPoolManager<JBuffer>	m_SerialBuffPoolMgr;				// CLanServer 직렬화 버퍼 메모리 풀 관리자
+
+	size_t						m_TlsMemPoolDefaultUnitCnt;			// tlsMemPool 기본 할당 메모리 객체 갯수
+	size_t						m_TlsMemPoolDefaultUnitCapacity;	// tlsMemPool 최대 메모리 객체 관리 갯수
+	UINT						m_SerialBufferSize;					// m_SerialBuffPoolMgr을 통해 생성된 tlsMemPool로 부터 할당받는 직렬화 버퍼 크기
+	// (서버에서 할당받아 사용되는 직렬화 버퍼 저장 데이터 중 가장 큰 값으로 지정 필요)
+#endif
+
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
 private:
 	HANDLE				m_CalcTpsThread;
