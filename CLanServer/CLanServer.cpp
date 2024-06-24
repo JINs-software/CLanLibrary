@@ -26,7 +26,7 @@ CLanServer::CLanServer(const char* serverIP, uint16 serverPort,
 #else
 	m_SessionSendBufferSize(sessionSendBuffSize), m_SessionRecvBufferSize(sessionRecvBuffSize),
 #endif
-	m_StopFlag(false), m_NumOfWorkerThreads(numOfWorkerThreads),
+	m_StopFlag(false), m_NumOfWorkerThreads(numOfWorkerThreads), m_RunningWorkerThreads(0),
 	m_SerialBuffPoolMgr(tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity, tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag),
 	m_TlsMemPoolDefaultUnitCnt(tlsMemPoolDefaultUnitCnt), m_TlsMemPoolDefaultUnitCapacity(tlsMemPoolDefaultUnitCapacity),
 	m_SerialBufferSize(serialBufferSize),
@@ -738,10 +738,8 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 				stCLanSession* newSession = clanserver->CreateNewSession(clientSock);
 				if (newSession != nullptr) {
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
-					clanserver->m_CalcTpsItems[ACCEPT_TRANSACTION]++;
-					clanserver->m_TotalTransaction[ACCEPT_TRANSACTION]++;
+					clanserver->IncrementAcceptTransactions();
 #endif
-
 					// 세션 생성 이벤트
 					clanserver->OnClientJoin(newSession->uiId);
 
@@ -797,6 +795,8 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 	if (!clanserver->m_WorkerThreadStartFlag[GetThreadId(GetCurrentThread())]) {
 		return 0;
 	}
+
+	InterlockedIncrement16((SHORT*)&clanserver->m_RunningWorkerThreads);
 
 	clanserver->OnWorkerThreadStart();
 
@@ -951,6 +951,9 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 						JBuffer* sendBuff = session->sendPostedQueue[i];
 						session->sendPostedQueue[i] = NULL;
 						
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+						clanserver->IncrementSendTransactions(true, sendBuff->GetUseSize());
+#endif
 						clanserver->m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendBuff);
 					}
 #else
@@ -1060,43 +1063,17 @@ UINT __stdcall CLanServer::WorkerThreadFunc(void* arg)
 
 	clanserver->OnWorkerThreadEnd();
 
+	InterlockedDecrement16((SHORT*)&clanserver->m_RunningWorkerThreads);
+
 	return 0;
 }
-
-#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
-{
-	CLanServer* clanserver = (CLanServer*)arg;
-
-	for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
-		clanserver->m_CalcTpsItems[i] = 0;
-		clanserver->m_TpsItems[i] = 0;
-		clanserver->m_TotalTransaction[i] = 0;
-	}
-
-	while (true) {
-		// TPS 항목 읽기
-		for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
-			clanserver->m_TpsItems[i] = clanserver->m_CalcTpsItems[i];
-			//clanserver->m_TotalTransaction[i] += clanserver->m_CalcTpsItems[i];
-		}
-
-		// TPS 항목 전송
-
-		// TPS 항목 초기화
-		for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
-			clanserver->m_CalcTpsItems[i] = 0;
-		}
-		Sleep(1000);
-	}
-	return 0;
-}
-#endif
 
 bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer)
 {
+	LONG			totalRecvPacketSize = 0;
+
 	if (m_RecvBufferingMode) {
-		JSerialBuffer jserialBuff;
+		JSerialBuffer	jserialBuff;
 		while (recvRingBuffer.GetUseSize() >= sizeof(stMSG_HDR)) {
 			//stMSG_HDR* hdr = (stMSG_HDR*)recvRingBuffer.GetDequeueBufferPtr();
 			// => 링버퍼를 참조하기에 헤더가 링버퍼 시작과 끝 지점에 걸쳐 있을 수 있음. Decode시 에러 식별(checkSum 에러)
@@ -1117,8 +1094,10 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 				return false;
 			}
 
-			jserialBuff.Insert(recvRingBuffer, hdr.len, true);
+			jserialBuff.Serialize(recvRingBuffer, hdr.len, true);
 			recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
+
+			totalRecvPacketSize += sizeof(stMSG_HDR) + hdr.len;
 		}
 		OnRecv(sessionID, jserialBuff);
 	}
@@ -1147,12 +1126,18 @@ bool CLanServer::ProcessReceiveMessage(UINT64 sessionID, JBuffer& recvRingBuffer
 				return false;
 			}
 
-			JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
-			OnRecv(sessionID, recvBuff);
-
+			//JSerBuffer recvBuff(recvRingBuffer, hdr.len, true);
+			JBuffer recvPacket = recvRingBuffer.SliceBuffer(hdr.len, true);
+			OnRecv(sessionID, recvPacket);
 			recvRingBuffer.DirectMoveDequeueOffset(hdr.len);
+
+			totalRecvPacketSize += sizeof(stMSG_HDR) + hdr.len;
 		}
 	}
+
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	IncrementRecvTransactions(true, totalRecvPacketSize);
+#endif
 
 	if (recvRingBuffer.GetUseSize() == 0) {
 		recvRingBuffer.ClearBuffer();
@@ -1285,9 +1270,21 @@ void CLanServer::ConsoleLog()
 	SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
 
 	std::cout << "================ SERVER CORE CONSOLE MONT ================ " << std::endl;
-	// Accept TPS
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+	std::cout << "[Worker Thread] IOCP Worker Threads : " << m_RunningWorkerThreads << std::endl;
+	std::cout << "----------------------------------------------------------" << std::endl;
+	std::cout << "[Accept] Total Accept Count     : " << GetTotalAcceptTransaction() << std::endl;
+	std::cout << "[Accept] Accept TPS             : " << GetAcceptTPS() << std::endl;
+	std::cout << "----------------------------------------------------------" << std::endl;
+	std::cout << "[Recv]   Total Recv Packet Size : " << GetTotalRecvTransaction() << std::endl;
+	std::cout << "[Recv]   Total Recv TPS         : " << GetRecvTPS() << std::endl;
+	std::cout << "----------------------------------------------------------" << std::endl;
+	std::cout << "[Send]   Total Send Packet Size : " << GetTotalSendTransaction() << std::endl;
+	std::cout << "[Send]   Total Send TPS         : " << GetSendTPS() << std::endl;
+#else
 	std::cout << "[Accept] Total Accept Count : " << m_TotalAccept << std::endl;
 	std::cout << "[Accept] Accept TPS         : " << GetAndResetAcceptTransaction() << std::endl;
+#endif
 	std::cout << "----------------------------------------------------------" << std::endl;
 	std::cout << "[Session] Session acceptance limit               : " << m_MaxOfSessions << std::endl;
 	std::cout << "[Session] Current number of sessions             : " << GetSessionCount() << std::endl;
@@ -1373,5 +1370,31 @@ void CLanServer::MemAllocLog()
 	outputFile.close();
 
 	std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
+}
+#endif
+
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+UINT __stdcall CLanServer::CalcTpsThreadFunc(void* arg)
+{
+	CLanServer* clanserver = (CLanServer*)arg;
+
+	// Transaction / TPS / Total Transactions 초기화
+	for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
+		clanserver->m_Transactions[i] = 0;
+		clanserver->m_TransactionsPerSecond[i] = 0;
+		clanserver->m_TotalTransaction[i] = 0;
+	}
+
+	while (!clanserver->m_StopFlag) {
+		// Transaction / TPS / Total Transactions 갱신
+		for (int i = 0; i < NUM_OF_TPS_ITEM; i++) {
+			clanserver->m_TransactionsPerSecond[i] = clanserver->m_Transactions[i];
+			clanserver->m_TotalTransaction[i] += clanserver->m_Transactions[i];
+			clanserver->m_Transactions[i] = 0;
+		}
+
+		Sleep(1000);
+	}
+	return 0;
 }
 #endif

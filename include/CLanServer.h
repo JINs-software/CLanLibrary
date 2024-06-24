@@ -238,9 +238,6 @@ private:
 
 	static UINT __stdcall AcceptThreadFunc(void* arg);
 	static UINT __stdcall WorkerThreadFunc(void* arg);
-#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-	static UINT	__stdcall CalcTpsThreadFunc(void* arg);
-#endif
 
 protected:
 	/////////////////////////////////////////////////////////////////
@@ -520,6 +517,7 @@ private:
 
 	// 2. IOCP Worker Thread(multi)
 	UINT16				m_NumOfWorkerThreads;		// 생성자를 통해 설정, 0 전달 시 GetSystemInfo 호출을 통해 가용 CPU 갯수로 설정
+	UINT16				m_RunningWorkerThreads;
 	vector<HANDLE>		m_WorkerThreads;
 	vector<DWORD>		m_WorkerThreadIDs;
 	map<DWORD, bool>	m_WorkerThreadStartFlag;	// 작업자 스레드 생성 시 OnWorkerThreadCreate 호출
@@ -540,29 +538,78 @@ public:
 	// (서버에서 할당받아 사용되는 직렬화 버퍼 저장 데이터 중 가장 큰 값으로 지정 필요)
 #endif
 
+	/////////////////////////////////
+	// Server Transactions, TPS
+	/////////////////////////////////
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
 private:
-	HANDLE				m_CalcTpsThread;
-protected:
-	LONG				m_CalcTpsItems[NUM_OF_TPS_ITEM];
-	LONG				m_TpsItems[NUM_OF_TPS_ITEM];
-	LONG				m_TotalTransaction[NUM_OF_TPS_ITEM];
+	HANDLE					m_CalcTpsThread;
+	static UINT	__stdcall	CalcTpsThreadFunc(void* arg);
+
+	UINT				m_Transactions[NUM_OF_TPS_ITEM];
+	UINT				m_TransactionsPerSecond[NUM_OF_TPS_ITEM];
+	UINT64				m_TotalTransaction[NUM_OF_TPS_ITEM];
+	
 public:
-	inline void IncrementRecvTransaction(LONG cnt = 1) {
-		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], cnt);
-		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], cnt);
+	inline UINT GetAcceptTPS() {
+		return GetTransactionsPerSecond(ACCEPT_TRANSACTION);
 	}
-	inline void IncrementRecvTransactionNoGuard(LONG cnt = 1) {
-		m_CalcTpsItems[RECV_TRANSACTION] += cnt;
-		m_TotalTransaction[RECV_TRANSACTION] += cnt;
+	inline UINT GetRecvTPS() {
+		return GetTransactionsPerSecond(RECV_TRANSACTION);
 	}
-	inline void IncrementSendTransaction(LONG cnt = 1) {
-		InterlockedAdd(&m_CalcTpsItems[SEND_TRANSACTION], cnt);
-		InterlockedAdd(&m_TotalTransaction[SEND_TRANSACTION], cnt);
+	inline UINT GetSendTPS() {
+		return GetTransactionsPerSecond(SEND_TRANSACTION);
 	}
-	inline void IncrementSendTransactionNoGuard(LONG cnt = 1) {
-		m_CalcTpsItems[SEND_TRANSACTION] += cnt;
-		m_TotalTransaction[SEND_TRANSACTION] += cnt;
+
+	inline UINT64 GetTotalAcceptTransaction() {
+		return GetTotalTransactions(ACCEPT_TRANSACTION);
+	}
+	inline UINT64 GetTotalRecvTransaction() {
+		return GetTotalTransactions(RECV_TRANSACTION);
+	}
+	inline UINT64 GetTotalSendTransaction() {
+		return GetTotalTransactions(SEND_TRANSACTION);
+	}
+
+public:
+	inline void IncrementRecvTransactions(bool threadSafe, UINT incre) {
+		if (incre > 0) {
+			IncrementTransactions(RECV_TRANSACTION, threadSafe, incre);
+		}
+	}
+	inline void IncrementSendTransactions(bool threadSafe, UINT incre) {
+		if (incre > 0) {
+			IncrementTransactions(SEND_TRANSACTION, threadSafe, incre);
+		}
+	}
+
+private:
+	inline void IncrementAcceptTransactions(bool threadSafe = false, UINT incre = 1) {
+		if (incre > 0) {
+			IncrementTransactions(ACCEPT_TRANSACTION, threadSafe, incre);
+		}
+	}
+
+private:
+	inline void IncrementTransactions(BYTE type, bool threadSafe = false, UINT incre = 1) {
+		if (threadSafe) {
+			if (incre == 1) {
+				InterlockedIncrement(&m_Transactions[type]);
+			}
+			else {
+				InterlockedAdd((LONG*)&m_Transactions[type], incre);
+			}
+		}
+		else {
+			m_Transactions[type]++;
+		}
+	}
+
+	inline LONG GetTransactionsPerSecond(BYTE type) {
+		return m_TransactionsPerSecond[type];
+	}
+	inline UINT64 GetTotalTransactions(BYTE type) {
+		return m_TotalTransaction[type];
 	}
 #endif
 };
