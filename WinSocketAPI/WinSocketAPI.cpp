@@ -226,6 +226,10 @@ SOCKET AcceptSocket(SOCKET& sock, SOCKADDR_IN& clientAddr, int* errCode)
 	return clientSock;
 }
 
+void IN_ADDR_TO_STRING(const IN_ADDR& inAddr, char ipStr[16]) {
+	inet_ntop(AF_INET, &inAddr.S_un.S_addr, ipStr, 16);
+}
+
 bool DomainAddrToIP(WCHAR* szDomain, IN_ADDR* pAddr)
 {
 	ADDRINFOW* pAddrInfo;

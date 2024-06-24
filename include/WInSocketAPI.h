@@ -59,6 +59,10 @@ bool		ListenSocket(SOCKET& sock, int backlog, OUT int* errCode = NULL);
 // if socket returned == INVALID_SOCKET, 
 SOCKET		AcceptSocket(SOCKET& sock, SOCKADDR_IN& clientAddr, OUT int* errCode = NULL);
 
+
+// INADDR_IN -> std::string IP 林家
+void IN_ADDR_TO_STRING(const IN_ADDR& inAddr, char ipStr[INET_ADDRSTRLEN]);
+
 // 档皋牢 -> IP 林家
 bool		DomainAddrToIP(WCHAR* szDomain, IN_ADDR* pAddr);
 

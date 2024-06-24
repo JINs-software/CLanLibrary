@@ -741,7 +741,7 @@ UINT __stdcall CLanServer::AcceptThreadFunc(void* arg)
 					clanserver->IncrementAcceptTransactions();
 #endif
 					// 技记 积己 捞亥飘
-					clanserver->OnClientJoin(newSession->uiId);
+					clanserver->OnClientJoin(newSession->uiId, clientAddr);
 
 					if (CreateIoCompletionPort((HANDLE)clientSock, clanserver->m_IOCP, (ULONG_PTR)newSession, 0) == NULL) {
 #if defined(CLANSERVER_ASSERT)

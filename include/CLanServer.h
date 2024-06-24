@@ -288,7 +288,7 @@ protected:
 		return ret;
 	}
 
-	virtual void OnClientJoin(UINT64 sessionID) = 0;
+	virtual void OnClientJoin(UINT64 sessionID, const SOCKADDR_IN& clientSockAddr) = 0;
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
 	// OnDeleteSendPacket
