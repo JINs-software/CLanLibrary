@@ -759,6 +759,34 @@ public:
 		return ret;
 	}
 
+	bool flushall(uint32_t& retval)
+	{
+		if (!_connected || !_redCtx)
+		{
+			_errStr = _errDes[ERR_NO_CONNECT];
+			return false;
+		}
+
+		bool ret = false;
+		redisReply* reply = redisCmd("flushall");
+
+		if (_getError(reply))
+		{
+			ret = false;
+		}
+		else
+		{
+			retval = (uint32_t)reply->integer;
+			ret = true;
+		}
+
+		if (NULL != reply)
+		{
+			freeReplyObject(reply);
+		}
+
+		return ret;
+	}
 
 	//////////////////////////////   hash 사용 방법 //////////////////////////////////////
 
