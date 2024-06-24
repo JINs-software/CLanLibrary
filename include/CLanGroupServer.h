@@ -262,17 +262,11 @@ protected:
 	}
 
 #if defined(CALCULATE_TRANSACTION_PER_SECOND)
-	inline void IncrementRecvTransaction(LONG cnt = 1) {
-		m_ClanGroupServer->IncrementRecvTransaction(cnt);
+	inline void IncrementRecvTransaction(bool threadSafe, UINT recvSize) {
+		m_ClanGroupServer->IncrementRecvTransactions(threadSafe, recvSize);
 	}
-	inline void IncrementRecvTransactionNoGuard(LONG cnt = 1) {
-		m_ClanGroupServer->IncrementRecvTransactionNoGuard(cnt);
-	}
-	inline void IncrementSendTransaction(LONG cnt = 1) {
-		m_ClanGroupServer->IncrementSendTransaction(cnt);
-	}
-	inline void IncrementSendTransactionNoGuard(LONG cnt = 1) {
-		m_ClanGroupServer->IncrementSendTransactionNoGuard(cnt);
+	inline void IncrementSendTransaction(bool threadSafe, UINT sendSize) {
+		m_ClanGroupServer->IncrementSendTransactions(threadSafe, sendSize);
 	}
 #endif
 
