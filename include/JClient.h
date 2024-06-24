@@ -103,6 +103,14 @@ protected:
 	inline void AddRefSerialBuff(JBuffer* buff) {
 		m_TlsMemPoolMgr->GetTlsMemPool().IncrementRefCnt(buff, 1);
 	}
+	inline size_t GetAllocMemPoolUsageUnitCnt() {
+		//return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
+		return m_TlsMemPoolMgr->GetAllocatedMemUnitCnt();
+	}
+	inline size_t GetAllocMemPoolUsageSize() {
+		//return (m_SerialBuffPoolMgr.GetTotalAllocMemCnt() - m_SerialBuffPoolMgr.GetTotalFreeMemCnt()) * sizeof(stMemPoolNode<JBuffer>);
+		return m_TlsMemPoolMgr->GetAllocatedMemUnitCnt() * (sizeof(stMemPoolNode<JBuffer>) + m_SerialBuffSize);
+	}
 
 private:
 	bool InitClient(const CHAR* clanServerIP, USHORT clanserverPort);
