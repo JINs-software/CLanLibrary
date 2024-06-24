@@ -195,8 +195,8 @@ UINT __stdcall CLanClient::CLanNetworkFunc(void* arg)
 						return false;
 					}
 
-					JSerBuffer recvBuff(clanclient->m_RecvBufferFromCLanServer, hdr.len, true);
-					clanclient->OnRecvFromCLanServer(recvBuff);
+					JBuffer recvPacket = clanclient->m_RecvBufferFromCLanServer.SliceBuffer(hdr.len, true);
+					clanclient->OnRecvFromCLanServer(recvPacket);
 					clanclient->m_RecvBufferFromCLanServer.DirectMoveDequeueOffset(hdr.len);
 				}
 
