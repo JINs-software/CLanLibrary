@@ -289,6 +289,50 @@ bool CLanServer::SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded
 
 	return true;
 }
+bool CLanServer::SendPacketBlocking(uint64 sessionID, JBuffer* sendDataPtr, bool encoded)
+{
+	stCLanSession* session = AcquireSession(sessionID);
+	if (session != nullptr) {				// 인덱스가 동일한 다른 세션이거나 제거된(제거중인) 세션
+
+		if (!encoded) {
+			///////////////////////////////////////////// 인코딩 수행 //////////////////////////////////////////////////
+			if (sendDataPtr->GetUseSize() < sizeof(stMSG_HDR)) {
+#if defined(CLANSERVER_ASSERT)
+				DebugBreak();
+#endif
+				return false;
+			}
+			else {
+				UINT offset = 0;
+				stMSG_HDR* hdr;// = (stMSG_HDR*)sendDataPtr->GetDequeueBufferPtr();
+				while (offset < sendDataPtr->GetUseSize()) {
+					hdr = (stMSG_HDR*)sendDataPtr->GetBufferPtr(offset);
+					offset += sizeof(stMSG_HDR);
+					if (hdr->randKey == (BYTE)-1) {
+						hdr->randKey = GetRandomKey();
+						Encode(hdr->randKey, hdr->len, hdr->checkSum, sendDataPtr->GetBufferPtr(offset));
+					}
+					offset += hdr->len;
+				}
+			}
+			///////////////////////////////////////////////////////////////////////////////////////////////////////////
+		}
+
+		int sendDataLen = sendDataPtr->GetUseSize();
+		if (sendDataLen != ::send(session->sock, (const char*)sendDataPtr->GetBeginBufferPtr(), sendDataLen, 0)) {
+			DebugBreak();
+		}
+
+		FreeSerialBuff(sendDataPtr);
+	}
+	else {
+		return false;
+	}
+
+	ReturnSession(session);
+
+	return true;
+}
 #else
 bool CLanServer::SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr, bool reqToWorkerTh)
 {

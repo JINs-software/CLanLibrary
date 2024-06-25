@@ -206,6 +206,7 @@ public:
 	/////////////////////////////////////////////////////////////////
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	bool SendPacket(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false, bool postToWorker = false);
+	bool SendPacketBlocking(uint64 sessionID, JBuffer* sendDataPtr, bool encoded = false);
 #else
 	bool SendPacket(uint64 sessionID, std::shared_ptr<JBuffer> sendDataPtr, bool reqToWorkerTh = false);
 #endif
