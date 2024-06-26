@@ -1,5 +1,10 @@
 #include <stdlib.h>
 #include <iostream>
+#include <string>
+#include <fstream>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 #include "DBConnection.h"
 
 bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
@@ -29,15 +34,32 @@ bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
 	);
 
 	if (!(ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)) {
-		std::wcout << L"SQLDriverConnectW return Fail.. (result string: " << resultString << L")" <<std::endl;
-		HandleError(ret, SQL_HANDLE_DBC, m_DBConnection);
+		if (m_ConnectionErrorFileLogFlag) {
+			SQLWCHAR	errMsgOut[WVARCHAR_MAX] = { NULL };
+			SQLSMALLINT	errMsgLen = 0;
+			HandleError(ret, SQL_HANDLE_DBC, m_DBConnection, sizeof(errMsgOut), errMsgOut, &errMsgLen);
+			ErrorMsgFileLogging(errMsgOut, errMsgLen, m_ConnectionErrLogFile);
+		}
+		else {
+			HandleError(ret, SQL_HANDLE_DBC, m_DBConnection);
+		}
+		
+		
 
 		return false;
 	}
 
 	// 3. statement 핸들을 할당 받는다.
 	if ((ret = ::SQLAllocHandle(SQL_HANDLE_STMT, m_DBConnection, &m_Statement)) != SQL_SUCCESS) {
-		HandleError(ret);
+		if (m_ConnectionErrorFileLogFlag) {
+			SQLWCHAR	errMsgOut[WVARCHAR_MAX] = { NULL };
+			SQLSMALLINT errMsgLen = 0;
+			HandleError(ret, sizeof(errMsgOut), (SQLWCHAR*)errMsgOut, &errMsgLen);
+			ErrorMsgFileLogging(errMsgOut, errMsgLen, m_ConnectionErrLogFile);
+		}
+		else {
+			HandleError(ret);
+		}
 		return false;
 	}
 
@@ -61,6 +83,12 @@ void DBConnection::Clear()
 	}
 }
 
+bool DBConnection::Ping()
+{
+	const SQLWCHAR* pingQuery = L"SELECT 1";
+	return Execute(pingQuery);
+}
+
 bool DBConnection::Execute(const WCHAR* query)
 {
 	// SQL 쿼리를 인자로 받아, SQLExecDirect 함수에 전달
@@ -69,7 +97,16 @@ bool DBConnection::Execute(const WCHAR* query)
 		return true;
 	}
 
-	HandleError(ret);
+	if (m_ConnectionErrorFileLogFlag) {
+		SQLWCHAR	errMsgOut[WVARCHAR_MAX];
+		SQLSMALLINT errMsgLen = 0;
+		HandleError(ret, sizeof(errMsgOut), (SQLWCHAR*)errMsgOut, &errMsgLen);
+		ErrorMsgFileLogging(errMsgOut, errMsgLen, m_ConnectionErrLogFile);
+	}
+	else {
+		HandleError(ret);
+	}
+
 	return false;
 }
 
@@ -86,7 +123,17 @@ bool DBConnection::Fetch()
 	case SQL_NO_DATA:		// 쿼리는 성공이나 반환 데이터가 없는 경우
 		return false;
 	case SQL_ERROR:			// 쿼리 수행 자체에서 문제 발생
-		HandleError(ret);
+	{
+		if (m_ConnectionErrorFileLogFlag) {
+			SQLWCHAR	errMsgOut[WVARCHAR_MAX];
+			SQLSMALLINT errMsgLen = 0;
+			HandleError(ret, sizeof(errMsgOut), (SQLWCHAR*)errMsgOut, &errMsgLen);
+			ErrorMsgFileLogging(errMsgOut, errMsgLen, m_ConnectionErrLogFile);
+		}
+		else {
+			HandleError(ret);
+		}
+	}
 		return false;
 	default:
 		return true;
@@ -300,15 +347,17 @@ void DBConnection::HandleError(SQLRETURN ret, SQLSMALLINT errMsgBuffLen, SQLWCHA
 		// 에러가 없거나, 성공이 였다면 루프 탈출
 		if (errorRet == SQL_NO_DATA)
 			break;
-		if (errorRet == SQL_SUCCESS || errorRet == SQL_SUCCESS_WITH_INFO)
+		// SQLGetDiagRecW 함수 자체의 에러 반환
+		if (errorRet != SQL_SUCCESS && errorRet != SQL_SUCCESS_WITH_INFO)
 			break;
 
 		if (errMsgBuffLen >= errMsgOffset + msgLen + 1) {
-			if (errMsgOut != NULL) {
+			if (errMsgOut != NULL && errMsgLenOut != NULL) {
 				std::wcout.imbue(std::locale("kor"));
-				memcpy(&errMsgOut[errMsgOffset], errMsg, msgLen);
+				memcpy(&errMsgOut[errMsgOffset], errMsg, sizeof(WCHAR) * msgLen);
 				errMsgOut[errMsgOffset + msgLen] = NULL;
 				errMsgOffset += (msgLen + 1);
+				*errMsgLenOut += msgLen + 1;
 			}
 		}
 
@@ -349,20 +398,58 @@ void DBConnection::HandleError(SQLRETURN ret, SQLSMALLINT hType, SQLHANDLE handl
 		// 에러가 없거나, 성공이 였다면 루프 탈출
 		if (errorRet == SQL_NO_DATA)
 			break;
+		// SQLGetDiagRecW 함수 자체의 에러 반환
 		if (errorRet != SQL_SUCCESS && errorRet != SQL_SUCCESS_WITH_INFO)
 			break;
 
 		std::wcout << errMsg << std::endl;
 
 		if (errMsgBuffLen >= errMsgOffset + msgLen + 1) {
-			if (errMsgOut != NULL) {
+			if (errMsgOut != NULL && errMsgLenOut != NULL) {
 				std::wcout.imbue(std::locale("kor"));
-				memcpy(&errMsgOut[errMsgOffset], errMsg, msgLen);
+				memcpy(&errMsgOut[errMsgOffset], errMsg, sizeof(WCHAR) * msgLen);
 				errMsgOut[errMsgOffset + msgLen] = NULL;
 				errMsgOffset += (msgLen + 1);
+				*errMsgLenOut += msgLen + 1;
 			}
 		}
 
 		index++;
 	}
+}
+
+void DBConnection::ErrorMsgFileLogging(const SQLWCHAR* errMsg, SQLSMALLINT errMsgLen, const std::wstring& filePath)
+{
+	auto now = std::chrono::system_clock::now();
+	auto in_time_t = std::chrono::system_clock::to_time_t(now);
+	std::tm buf;
+	localtime_s(&buf, &in_time_t);
+	std::wstringstream ss;
+	ss << std::put_time(&buf, L"[%Y.%m.%d %H:%M:%S]");
+	std::wstring nowStr = ss.str();
+
+	std::lock_guard<std::mutex> lockGuard(m_LogFileMtx);
+
+	const wchar_t* ptr;
+	std::wofstream outFile(filePath, std::ios::app);  // append 모드로 파일 열기
+	if (!outFile) {
+		std::wcerr << L"Failed to open file for writing: " << filePath << std::endl;
+		return;
+	}
+
+	outFile << nowStr << std::endl;
+
+	for (int i = 0; i < errMsgLen;) {
+		ptr = &errMsg[i];
+		if (*ptr == L'\0') {
+			i++;
+		}
+		else {
+			outFile << ptr << std::endl;
+			i += wcslen(ptr) + 1;
+		}
+	}
+
+	outFile << std::endl;
+	outFile.close();
 }

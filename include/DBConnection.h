@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <sql.h>
 #include <sqlext.h>
+#include <mutex>
 
 enum
 {
@@ -20,15 +21,22 @@ private:
 	// API에 인수를 전달하거나, 출력 인수로 데이터를 받을 수 있는 "상태"로 해석
 	SQLHSTMT		m_Statement = SQL_NULL_HANDLE;
 
+	bool				m_ConnectionErrorFileLogFlag;
+	const wchar_t*		m_ConnectionErrLogFile = L"ConnectionErrLog.txt";
+	static std::mutex	m_LogFileMtx;
 
 public:
-	DBConnection() {}
+	DBConnection() : DBConnection(false) {}
+	DBConnection(BOOL connectionErrorFileLogFlag) : m_ConnectionErrorFileLogFlag(connectionErrorFileLogFlag) {}
 	~DBConnection() {
 		Clear();
 	}
 
 	bool			Connect(SQLHENV henv, const WCHAR* connectionString);
 	void			Clear();
+
+	// DB 커넥션 연결 유지 확인을 위해 단순 쿼리 확인
+	bool			Ping();
 
 	// 쿼리를 실행하는 SQL 함수
 	bool			Execute(const WCHAR* query);
@@ -86,7 +94,8 @@ public:
 	bool			BindCol(SQLUSMALLINT columnIndex, SQLSMALLINT cType, SQLULEN len, SQLPOINTER value, SQLLEN* index);
 
 private:
-	void			HandleError(SQLRETURN ret, SQLSMALLINT errMsgBuffLen = 0, SQLWCHAR* errMsgOut = NULL, SQLSMALLINT* errMsgLenOut = NULL);
-	void			HandleError(SQLRETURN ret, SQLSMALLINT hType, SQLHANDLE handle, SQLSMALLINT errMsgBuffLen = 0, SQLWCHAR* errMsgOut = NULL, SQLSMALLINT* errMsgLenOut = NULL);
+	void			HandleError(SQLRETURN ret,	SQLSMALLINT errMsgBuffLen = 0, SQLWCHAR* errMsgOut = NULL,	SQLSMALLINT* errMsgLenOut = NULL);
+	void			HandleError(SQLRETURN ret,	SQLSMALLINT hType,             SQLHANDLE handle,				SQLSMALLINT errMsgBuffLen = 0,	SQLWCHAR* errMsgOut = NULL, SQLSMALLINT* errMsgLenOut = NULL);
+	void			ErrorMsgFileLogging(const SQLWCHAR* errMsg, SQLSMALLINT errMsgLen, const std::wstring& filePath);
 };
 
