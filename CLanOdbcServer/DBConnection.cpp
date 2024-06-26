@@ -7,6 +7,8 @@
 #include <sstream>
 #include "DBConnection.h"
 
+std::mutex	DBConnection::m_LogFileMtx;
+
 bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
 {
 	SQLRETURN ret;
