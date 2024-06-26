@@ -19,7 +19,7 @@ bool DBConnectionPool::Connect(INT32 connectionCount, const WCHAR* connectionStr
 	std::lock_guard<std::mutex> lockGuard(m_DBConnectionsMtx);
 	for (INT32 i = 0; i < connectionCount; i++)
 	{
-		DBConnection* connection = new DBConnection();
+		DBConnection* connection = new DBConnection(m_DBConnErrorLogFlag);
 		// 할당 받은 SQL 환경 핸들을 전달한다. 
 		if (connection->Connect(m_SqlEnvironment, connectionString) == false)
 			return false;
@@ -58,9 +58,28 @@ DBConnection* DBConnectionPool::Pop()
 	return connection;
 }
 
-void DBConnectionPool::Push(DBConnection* connection)
+void DBConnectionPool::Push(DBConnection* connection, bool isDisconnected, bool tryToConnect, const WCHAR* connectionString)
 {
 	std::lock_guard<std::mutex> lockGuard(m_DBConnectionsMtx);
 
-	m_DBConnections.push_back(connection);
+	if (isDisconnected) {
+		if (!connection->Ping()) {
+			delete connection;
+
+			if (tryToConnect) {
+				connection = new DBConnection(m_DBConnErrorLogFlag);
+				if (!connection->Connect(m_SqlEnvironment, connectionString)) {
+					return;
+				}
+				m_DBConnections.push_back(connection);
+			}
+		}
+		else {
+			// isDisconnected: true -> ping 성공?
+			m_DBConnections.push_back(connection);
+		}
+	}
+	else {
+		m_DBConnections.push_back(connection);
+	}
 }

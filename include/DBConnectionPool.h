@@ -15,8 +15,11 @@ private:
 	std::vector<DBConnection*>	m_DBConnections;
 	std::mutex					m_DBConnectionsMtx;
 
+	bool						m_DBConnErrorLogFlag;
+
 public:
-	DBConnectionPool() {}
+	DBConnectionPool() : DBConnectionPool(false) {}
+	DBConnectionPool(bool dbConnErrorLog) : m_DBConnErrorLogFlag(dbConnErrorLog) {}
 	~DBConnectionPool() {
 		Clear();
 	}
@@ -31,6 +34,6 @@ public:
 	// 积己等 目池记 钱 吝 裙垫(POP)
 	DBConnection*			Pop();
 	// 目池记 钱俊 目池记 馆吵(PUSH)
-	void					Push(DBConnection* connection);
+	void					Push(DBConnection* connection, bool isDisconnected = false, bool tryToConnect = false, const WCHAR* connectionString = NULL);
 };
 
