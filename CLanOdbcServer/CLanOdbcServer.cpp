@@ -12,9 +12,10 @@ CLanOdbcServer::CLanOdbcServer(int32 dbConnectionCnt, const WCHAR* odbcConnStr,
 	uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
 	BYTE protocolCode, BYTE packetKey,
-	bool recvBufferingMode
+	bool recvBufferingMode,
+	bool dbConnErrorLogFlag
 ) 
-	: m_DBConnCnt(dbConnectionCnt), m_DBConnFlag(false), m_OdbcConnStr(odbcConnStr),
+	: m_DBConnCnt(dbConnectionCnt), m_DBConnFlag(false), m_OdbcConnStr(odbcConnStr), m_DBConnErrorLogFlag(dbConnErrorLogFlag),
 		CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections,
 				tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultUnitCapacity,
 				tlsMemPoolReferenceFlag, tlsMemPoolPlacementNewFlag,
@@ -30,7 +31,7 @@ CLanOdbcServer::CLanOdbcServer(int32 dbConnectionCnt, const WCHAR* odbcConnStr,
 {}
 
 bool CLanOdbcServer::Start() {
-	m_DBConnPool = new DBConnectionPool();
+	m_DBConnPool = new DBConnectionPool(m_DBConnErrorLogFlag);
 
 	if (!m_DBConnPool->Connect(m_DBConnCnt, m_OdbcConnStr)) {
 		std::cout << "CLanOdbcServer::m_DBConnPool->Connect(..) Fail!" << std::endl;
@@ -222,15 +223,11 @@ void CLanOdbcServer::UnBind(DBConnection* dbConn)
 }
 
 bool CLanOdbcServer::ExecQuery(DBConnection* dbConn, const wchar_t* query) {
-	if (dbConn == nullptr) {
-		return false;
+	bool ret = false;
+	if (dbConn->Execute(query)) {
+		ret = true;
 	}
-	else {
-		if (!dbConn->Execute(query)) {
-			return false;
-		}
-	}
-	return true;
+	return ret;
 }
 
 bool CLanOdbcServer::FetchQuery(DBConnection* dbConn) {

@@ -10,6 +10,8 @@ private:
 	bool						m_DBConnFlag;
 	const WCHAR*				m_OdbcConnStr;
 
+	bool						m_DBConnErrorLogFlag;
+
 public:
 	CLanOdbcServer(int32 dbConnectionCnt, const WCHAR* odbcConnStr,
 		const char* serverIP, uint16 serverPort,
@@ -23,7 +25,8 @@ public:
 		uint32 sessionSendBuffSize, uint32 sessionRecvBuffSize,
 #endif
 		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY,
-		bool recvBufferingMode = false
+		bool recvBufferingMode = false,
+		bool dbConnErrorLogFlag = false
 	);
 
 	bool Start();
@@ -33,7 +36,9 @@ protected:
 	// »ý¼ºµÈ DB Ä¿³Ø¼Ç Áß ÇÏ³ªÀÇ Ä¿³Ø¼ÇÀ» º£Å¸ÀûÀ¸·Î È¹µæ,	NULL ¹ÝÈ¯ ½Ã È¹µæ °¡´É DBConnection ¾øÀ½ (pool size: 0)
 	inline DBConnection* HoldDBConnection() { return m_DBConnPool->Pop(); }
 	// DB Ä¿³Ø¼Ç ¹Ý³³
-	inline void FreeDBConnection(DBConnection* dbConn) { m_DBConnPool->Push(dbConn); }
+	inline void FreeDBConnection(DBConnection* dbConn, bool isDisconnected = false, bool tryToConnect = false) { 
+		m_DBConnPool->Push(dbConn,isDisconnected, tryToConnect, m_OdbcConnStr); 
+	}
 
 	bool BindParameter(DBConnection* dbConn, INT32 paramIndex, bool* value);
 	bool BindParameter(DBConnection* dbConn, INT32 paramIndex, float* value);
