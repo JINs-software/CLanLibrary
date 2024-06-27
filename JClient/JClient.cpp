@@ -172,7 +172,9 @@ bool JClient::ConnectToServer(const CHAR* clanServerIP, USHORT clanserverPort)
 		int retval = WSARecv(m_ClientSock, &wsabuf, 1, &recvBytes, &flags, &m_RecvOverlapped, NULL);
 		if (retval == SOCKET_ERROR) {
 			if (WSAGetLastError() != ERROR_IO_PENDING) {
+#if defined(CLANSERVER_ASSERT)
 				DebugBreak();
+#endif
 				return false;
 			}
 		}
@@ -196,7 +198,9 @@ bool JClient::SendPacketToServer(JBuffer* sendPacket)
 	{
 		std::lock_guard<std::mutex> lockGuard(m_SendBufferMtx);
 		if (m_SendBuffer.GetFreeSize() < sizeof(UINT_PTR)) {
+#if defined(CLANSERVER_ASSERT)
 			DebugBreak();
+#endif
 		}
 		else {
 			m_SendBuffer.Enqueue((BYTE*)&sendPacket, sizeof(UINT_PTR));
@@ -225,7 +229,9 @@ void JClient::SendPostToServer()
 					wsabuffs[idx].buf = (CHAR*)msgPtr->GetBeginBufferPtr();
 					wsabuffs[idx].len = msgPtr->GetUseSize();
 					if (wsabuffs[idx].buf == NULL || wsabuffs[idx].len == 0) {
+#if defined(CLANSERVER_ASSERT)
 						DebugBreak();
+#endif
 					}
 				}
 
@@ -283,8 +289,11 @@ UINT __stdcall JClient::ClientNetworkThreadFunc(void* arg)
 				int retval = WSARecv(client->m_ClientSock, &wsabuf, 1, &recvBytes, &flags, &client->m_RecvOverlapped, NULL);
 				if (retval == SOCKET_ERROR) {
 					if (WSAGetLastError() != ERROR_IO_PENDING) {
+#if defined(CLANSERVER_ASSERT)
 						DebugBreak();
-						return 1;
+#else
+						continue;
+#endif
 					}
 				}
 			}
@@ -320,7 +329,9 @@ UINT __stdcall JClient::ClientNetworkThreadFunc(void* arg)
 		}
 		break;
 		default:
+#if defined(CLANSERVER_ASSERT)
 			DebugBreak();
+#endif
 			break;
 		}
 	}
