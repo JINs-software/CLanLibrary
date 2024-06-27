@@ -1,6 +1,7 @@
 #pragma once
 #include "DBConnection.h"
 #include <vector>
+#include <queue>
 #include <mutex>
 
 // 연결을 미리 여러 개 맺고, DB 요청이 필요할 때마다 Pool에서 재사용한다.
@@ -12,7 +13,8 @@ private:
 	SQLHENV						m_SqlEnvironment = SQL_NULL_HANDLE;
 
 	// DB 연결 단위들을 담는 벡터
-	std::vector<DBConnection*>	m_DBConnections;
+	//std::vector<DBConnection*>	m_DBConnections;
+	std::queue<DBConnection*>		m_DBConnectionsQueue;
 	std::mutex					m_DBConnectionsMtx;
 
 	bool						m_DBConnErrorLogFlag;

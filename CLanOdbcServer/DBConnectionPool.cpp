@@ -23,7 +23,8 @@ bool DBConnectionPool::Connect(INT32 connectionCount, const WCHAR* connectionStr
 		// 할당 받은 SQL 환경 핸들을 전달한다. 
 		if (connection->Connect(m_SqlEnvironment, connectionString) == false)
 			return false;
-		m_DBConnections.push_back(connection);
+		//m_DBConnections.push_back(connection);
+		m_DBConnectionsQueue.push(connection);
 	}
 
 	return true;
@@ -40,21 +41,30 @@ void DBConnectionPool::Clear()
 
 	// 2. 커넥션 풀의 커넥션 들에 대한 메모리를 반환
 	std::lock_guard<std::mutex> lockGuard(m_DBConnectionsMtx);
-	for (DBConnection* connection : m_DBConnections)
-		delete connection;
+	//for (DBConnection* connection : m_DBConnections)
+	//	delete connection;
+	//
+	//m_DBConnections.clear();
 
-	m_DBConnections.clear();
+	while (!m_DBConnectionsQueue.empty()) {
+		DBConnection* dbConn = m_DBConnectionsQueue.front();
+		m_DBConnectionsQueue.pop();
+		delete dbConn;
+	}
 }
 
 DBConnection* DBConnectionPool::Pop()
 {
 	std::lock_guard<std::mutex> lockGuard(m_DBConnectionsMtx);
 
-	if (m_DBConnections.empty())
+	//if (m_DBConnections.empty())
+	if(m_DBConnectionsQueue.empty())
 		return nullptr;
 
-	DBConnection* connection = m_DBConnections.back();
-	m_DBConnections.pop_back();
+	//DBConnection* connection = m_DBConnections.back();
+	//m_DBConnections.pop_back();
+	DBConnection* connection = m_DBConnectionsQueue.front();
+	m_DBConnectionsQueue.pop();
 	return connection;
 }
 
@@ -71,15 +81,18 @@ void DBConnectionPool::Push(DBConnection* connection, bool isDisconnected, bool 
 				if (!connection->Connect(m_SqlEnvironment, connectionString)) {
 					return;
 				}
-				m_DBConnections.push_back(connection);
+				//m_DBConnections.push_back(connection);
+				m_DBConnectionsQueue.push(connection);
 			}
 		}
 		else {
 			// isDisconnected: true -> ping 성공?
-			m_DBConnections.push_back(connection);
+			//m_DBConnections.push_back(connection);
+			m_DBConnectionsQueue.push(connection);
 		}
 	}
 	else {
-		m_DBConnections.push_back(connection);
+		//m_DBConnections.push_back(connection);
+		m_DBConnectionsQueue.push(connection);
 	}
 }
