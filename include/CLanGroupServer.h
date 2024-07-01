@@ -21,7 +21,7 @@ class CLanGroupThread;
 class CLanGroupServer : public CLanServer
 {
 public:
-	CLanGroupServer(const char* serverIP, uint16 serverPort,
+CLanGroupServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 		size_t tlsMemPoolDefaultUnitCnt, size_t tlsMemPoolDefaultUnitCapacity,
 		bool tlsMemPoolReferenceFlag, bool tlsMemPoolPlacementNewFlag,
@@ -79,7 +79,7 @@ protected:
 
 	// 그룹 식별
 	// ex) DB로부터 그룹을 식별한다.
-	virtual void OnClientJoin(SessionID sessionID) {};
+	virtual void OnClientJoin(SessionID sessionID, const SOCKADDR_IN& clientSockAddr) {};
 	virtual void OnClientLeave(SessionID sessionID) {};
 	//virtual UINT RecvData(JBuffer& recvBuff, JBuffer& dest) = 0;
 

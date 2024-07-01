@@ -80,8 +80,8 @@ void CLanGroupServer::OnRecv(UINT64 sessionID, JSerialBuffer& recvSerialBuff)
 
 #if defined(LOCKFREE_MESSAGE_QUEUE)
 	JBuffer* recvData = AllocSerialBuff();
-	UINT serialBuffSize = recvSerialBuff.GetSize();
-	recvSerialBuff.Pop(recvData->GetEnqueueBufferPtr(), serialBuffSize);
+	UINT serialBuffSize = recvSerialBuff.GetUseSize();
+	recvSerialBuff.Dequeue(recvData->GetEnqueueBufferPtr(), serialBuffSize);
 	recvData->DirectMoveEnqueueOffset(serialBuffSize);
 
 	m_GroupThreads[groupID]->PushRecvBuff(sessionID, recvData);
